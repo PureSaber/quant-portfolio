@@ -1,0 +1,7 @@
+{
+  "name": "quant-portfolio",
+  "private": true,
+  "scripts": {
+    "lint": "ruff check src tests"
+  }
+}

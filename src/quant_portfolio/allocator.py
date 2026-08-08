@@ -47,6 +47,40 @@ def _read_holdings(path: Path) -> pd.DataFrame:
     return df[["symbol", "weight"]].copy()
 
 
+def _read_factor_scores(path: Path, column: str) -> pd.Series:
+    if path.suffix == ".parquet":
+        df = pd.read_parquet(path)
+    else:
+        df = pd.read_csv(path)
+    if column not in df.columns:
+        raise ValueError(f"factor column {column} missing in {path}")
+    if "symbol" not in df.columns:
+        raise ValueError(f"factor scores need symbol column: {path}")
+    latest = df.sort_values("date").groupby("symbol", as_index=False).tail(1) if "date" in df.columns else df
+    scores = latest.set_index("symbol")[column].astype(float)
+    return scores
+
+
+def _blend_factor_scores(
+    combined: dict[str, float],
+    factor_scores: pd.Series,
+    weight: float,
+) -> dict[str, float]:
+    if factor_scores.empty:
+        return combined
+    aligned = {sym: combined.get(sym, 0.0) for sym in factor_scores.index}
+    if not aligned:
+        return combined
+    score = factor_scores.reindex(list(aligned.keys())).fillna(0.0)
+    score_norm = (score - score.mean()) / (score.std(ddof=0) or 1.0)
+    blended: dict[str, float] = {}
+    for sym, base_w in aligned.items():
+        tilt = 1.0 + weight * float(score_norm.get(sym, 0.0))
+        blended[sym] = max(base_w * tilt, 0.0)
+    total = sum(blended.values()) or 1.0
+    return {k: round(v / total, 6) for k, v in blended.items()}
+
+
 def allocate(config: dict) -> PortfolioSnapshot:
     strategies_cfg = config.get("strategies") or []
     books: list[StrategyBook] = []
@@ -88,6 +122,19 @@ def allocate(config: dict) -> PortfolioSnapshot:
 
     total_nav = sum(r["nav"] * r["budget_weight"] for r in nav_rows)
     as_of = max(r["as_of"] for r in nav_rows)
+
+    factor_cfg = config.get("factor_scores") or {}
+    if factor_cfg.get("path"):
+        scores = _read_factor_scores(
+            Path(factor_cfg["path"]),
+            str(factor_cfg.get("column", "momentum_20d")),
+        )
+        combined = _blend_factor_scores(
+            combined,
+            scores,
+            float(factor_cfg.get("weight", 0.25)),
+        )
+
     return PortfolioSnapshot(
         as_of=as_of,
         total_nav=round(total_nav, 4),

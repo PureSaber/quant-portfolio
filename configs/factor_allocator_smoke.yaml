@@ -1,0 +1,10 @@
+strategies:
+  - name: equity
+    nav: tests/fixtures/eq_nav.csv
+    weight: 1.0
+    position_scale: 1.0
+
+factor_scores:
+  path: tests/fixtures/factor_scores.parquet
+  column: momentum_20d
+  weight: 0.3

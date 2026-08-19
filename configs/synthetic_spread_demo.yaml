@@ -1,0 +1,11 @@
+periods: 756
+seed: 20260819
+start_price: 100.0
+spread_mean: 0.0
+mean_reversion: 0.08
+spread_volatility: 0.65
+market_volatility: 0.45
+lookback: 40
+entry_z: 1.8
+exit_z: 0.45
+cost_bps: 2.0

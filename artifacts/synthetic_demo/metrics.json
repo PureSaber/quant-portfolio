@@ -1,0 +1,25 @@
+{
+  "config": {
+    "cost_bps": 2.0,
+    "entry_z": 1.8,
+    "exit_z": 0.45,
+    "lookback": 40,
+    "market_volatility": 0.45,
+    "mean_reversion": 0.08,
+    "periods": 756,
+    "seed": 20260819,
+    "spread_mean": 0.0,
+    "spread_volatility": 0.65,
+    "start_price": 100.0
+  },
+  "disclaimer": "SYNTHETIC DEMONSTRATION — NOT INVESTMENT PERFORMANCE",
+  "metrics": {
+    "annualized_volatility": 0.03820990065461577,
+    "max_drawdown": -0.02860673523449142,
+    "observations": 756,
+    "sharpe": 1.6822720620736684,
+    "total_return": 0.21000700505995384,
+    "trades": 52,
+    "turnover": 52.0
+  }
+}

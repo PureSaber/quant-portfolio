@@ -1,13 +1,6 @@
 """Sanitized quantitative research and portfolio engineering demos."""
 
 from quant_portfolio.allocator import PortfolioSnapshot, allocate
-from quant_portfolio.synthetic_spread import (
-    BacktestMetrics,
-    SyntheticSpreadConfig,
-    backtest_synthetic_spread,
-    generate_synthetic_pair,
-)
-
 from quant_portfolio.optimization import (
     OptimizationConstraints,
     OptimizationResult,
@@ -15,6 +8,12 @@ from quant_portfolio.optimization import (
     estimate_covariance,
     optimize_mean_variance,
     square_root_impact_cost,
+)
+from quant_portfolio.synthetic_spread import (
+    BacktestMetrics,
+    SyntheticSpreadConfig,
+    backtest_synthetic_spread,
+    generate_synthetic_pair,
 )
 
 __all__ = [

@@ -49,6 +49,24 @@ quant-portfolio status \
 
 The allocator combines versioned strategy-book NAV and holdings fixtures, then optionally applies a normalized synthetic factor tilt.
 
+## Cost-aware optimizer
+
+```bash
+quant-portfolio optimize \
+  --expected-returns expected_returns.csv \
+  --returns asset_returns_wide.csv \
+  --current-weights current_weights.csv \
+  --linear-costs linear_costs.csv \
+  --liquidity liquidity.csv \
+  --max-weight 0.10 \
+  --max-turnover 0.40 \
+  --out state/target_portfolio.json
+```
+
+The optimizer uses a shrinkage/PSD-repaired covariance matrix and enforces budget, asset bounds,
+and turnover while charging linear costs. The Python API additionally supports group caps and the
+square-root market-impact model.
+
 ## Repository map
 
 ```text

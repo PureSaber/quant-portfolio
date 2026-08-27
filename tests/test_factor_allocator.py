@@ -1,12 +1,13 @@
 from pathlib import Path
 
 import pandas as pd
+import yaml
 
 from quant_portfolio.allocator import allocate, load_config
 
 
 def test_factor_allocator_smoke(tmp_path: Path) -> None:
-    fixture_dir = Path(__file__).parent / "fixtures"
+    fixture_dir = tmp_path / "fixtures"
     fixture_dir.mkdir(exist_ok=True)
     nav = fixture_dir / "eq_nav.csv"
     hold = fixture_dir / "eq_holdings.csv"
@@ -22,8 +23,20 @@ def test_factor_allocator_smoke(tmp_path: Path) -> None:
         }
     ).to_parquet(scores, index=False)
 
-    cfg_path = Path(__file__).resolve().parents[1] / "configs" / "factor_allocator_smoke.yaml"
-    assert cfg_path.is_file()
+    cfg_path = tmp_path / "factor_allocator_smoke.yaml"
+    cfg_path.write_text(
+        yaml.safe_dump(
+            {
+                "strategies": [{"name": "equity", "nav": str(nav), "weight": 1.0}],
+                "factor_scores": {
+                    "path": str(scores),
+                    "column": "momentum_20d",
+                    "weight": 0.3,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
     snap = allocate(load_config(cfg_path))
     assert snap.total_nav > 0
     assert set(snap.combined_weights) == {"AAA", "BBB"}

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quant-portfolio"
-version = "0.2.0"
+version = "0.3.0"
 description = "Sanitized quantitative research and portfolio engineering demos"
 readme = "README.md"
 license = { text = "MIT" }
@@ -13,6 +13,7 @@ dependencies = [
     "pandas>=2.0",
     "pyarrow>=14.0",
     "pyyaml>=6.0",
+    "numpy>=1.24",
 ]
 
 [project.optional-dependencies]

@@ -56,14 +56,28 @@ def _finite_positive(value: float, field_name: str) -> None:
         raise ValidationError(f"{field_name} must be positive")
 
 
+def _finite(value: float, field_name: str) -> None:
+    if (
+        not isinstance(value, (int, float))
+        or isinstance(value, bool)
+        or not isfinite(value)
+    ):
+        raise ValidationError(f"{field_name} must be finite")
+
+
 def _as_mapping(values: Mapping[str, float], field_name: str) -> Mapping[str, float]:
     if not isinstance(values, Mapping):
         raise ValidationError(f"{field_name} must be a mapping")
     checked: dict[str, float] = {}
+    normalized_keys: set[str] = set()
     for key, value in values.items():
         if not isinstance(key, str) or not key:
             raise ValidationError(f"{field_name} keys must be non-empty strings")
+        normalized_key = key.casefold()
+        if normalized_key in normalized_keys:
+            raise ValidationError(f"{field_name} keys must be unique ignoring case")
         _finite_non_negative(value, f"{field_name}[{key!r}]")
+        normalized_keys.add(normalized_key)
         checked[key] = float(value)
     return MappingProxyType(checked)
 
@@ -124,15 +138,15 @@ class CrossAssetInput:
             raise ValidationError("market must be a PITMarketSnapshot")
         if not isinstance(self.strategy_id, str) or not self.strategy_id.strip():
             raise ValidationError("strategy_id must be non-empty")
+        _finite(self.expected_return, "expected_return")
         for field_name in (
-            "expected_return",
             "daily_volatility",
             "linear_cost_bps",
             "impact_coefficient",
             "initial_margin_rate",
             "maintenance_margin_rate",
         ):
-            _finite_non_negative(abs(getattr(self, field_name)), field_name)
+            _finite_non_negative(getattr(self, field_name), field_name)
         if self.maintenance_margin_rate > self.initial_margin_rate + _EPSILON:
             raise ValidationError("maintenance_margin_rate cannot exceed initial_margin_rate")
         object.__setattr__(self, "strategy_id", self.strategy_id.strip())
@@ -326,6 +340,19 @@ def _bucket_value(item: CrossAssetInput, attribute: str) -> str:
     return str(getattr(item.instrument, attribute))
 
 
+def _unit_base(item: CrossAssetInput) -> Decimal:
+    rounded_price = _quantize_quantity(
+        _decimal(item.market.reference_price.value), item.instrument.price_tick
+    )
+    if rounded_price.units <= 0:
+        raise ValidationError("reference price rounds to zero at price_tick")
+    return (
+        _decimal(rounded_price)
+        * _decimal(item.instrument.contract_multiplier)
+        * _decimal(item.market.fx_to_base.value)
+    )
+
+
 def _project_weights(
     values: np.ndarray,
     current: np.ndarray,
@@ -346,7 +373,7 @@ def _project_weights(
             indexes = [
                 index
                 for index, item in enumerate(inputs)
-                if _bucket_value(item, attribute).lower() == bucket.lower()
+                if _bucket_value(item, attribute).casefold() == bucket.casefold()
             ]
             if indexes:
                 _scale_bucket(result, indexes, cap)
@@ -388,21 +415,28 @@ def _target_quantities(
     nav = _decimal(snapshot.nav)
     quantities: dict[str, FixedPoint] = {}
     for weight, item in zip(weights, inputs, strict=True):
-        rounded_price = _quantize_quantity(
-            _decimal(item.market.reference_price.value), item.instrument.price_tick
-        )
-        if rounded_price.units <= 0:
-            raise ValidationError("reference price rounds to zero at price_tick")
-        unit_base = (
-            _decimal(rounded_price)
-            * _decimal(item.instrument.contract_multiplier)
-            * _decimal(item.market.fx_to_base.value)
-        )
+        unit_base = _unit_base(item)
         quantities[item.instrument.instrument_id] = _quantize_quantity(
             Decimal(str(float(weight))) * nav / unit_base,
             item.instrument.quantity_step,
         )
     return MappingProxyType(dict(sorted(quantities.items())))
+
+
+def _realized_weights(
+    target: Mapping[str, FixedPoint],
+    snapshot: PortfolioRiskSnapshot,
+    inputs: Sequence[CrossAssetInput],
+) -> Mapping[str, float]:
+    nav = _decimal(snapshot.nav)
+    return MappingProxyType(
+        {
+            item.instrument.instrument_id: float(
+                _decimal(target[item.instrument.instrument_id]) * _unit_base(item) / nav
+            )
+            for item in inputs
+        }
+    )
 
 
 def _evaluate(
@@ -435,11 +469,7 @@ def _evaluate(
         current_quantity = _decimal(
             current.get(instrument_id, FixedPoint(0, item.instrument.quantity_step.scale))
         )
-        unit_base = (
-            _decimal(item.market.reference_price.value)
-            * _decimal(item.instrument.contract_multiplier)
-            * _decimal(item.market.fx_to_base.value)
-        )
+        unit_base = _unit_base(item)
         target_notional = target_quantity * unit_base
         trade = target_quantity - current_quantity
         trade_base = abs(trade * unit_base)
@@ -464,7 +494,8 @@ def _evaluate(
             ("venue", item.instrument.venue),
             ("strategy", item.strategy_id),
         ):
-            buckets[group][key] = buckets[group].get(key, 0.0) + abs(
+            normalized_key = key.casefold()
+            buckets[group][normalized_key] = buckets[group].get(normalized_key, 0.0) + abs(
                 float(target_notional / nav_decimal)
             )
     gross = float(sum(abs(weight) for weight in weights.values()))
@@ -519,7 +550,7 @@ def _evaluate(
         ("STRATEGY", constraints.strategy_caps, buckets["strategy"]),
     ):
         for key, cap in cap_map.items():
-            bind(code, bucket.get(key, 0.0), cap, key)
+            bind(code, bucket.get(key.casefold(), 0.0), cap, key)
     scale = snapshot.nav.scale
     report = CrossAssetReport(
         gross_leverage=gross,
@@ -554,8 +585,13 @@ def optimize_cross_asset(
 ) -> CrossAssetOptimizationResult:
     """Return a constrained target or a structured, fail-closed infeasibility result."""
     _finite_positive(risk_aversion, "risk_aversion")
-    if not isinstance(max_iterations, int) or max_iterations <= 0:
+    _finite_positive(tolerance, "tolerance")
+    if not isinstance(max_iterations, int) or isinstance(max_iterations, bool) or max_iterations <= 0:
         raise ValidationError("max_iterations must be a positive integer")
+    if not isinstance(expected_returns, pd.Series):
+        raise ValidationError("expected_returns must be a pandas Series")
+    if not isinstance(covariance, pd.DataFrame):
+        raise ValidationError("covariance must be a pandas DataFrame")
     ordered = _validate_inputs(portfolio_snapshot, decision_time, inputs)
     assets = [item.instrument.instrument_id for item in ordered]
     if list(expected_returns.index) != assets:
@@ -584,7 +620,12 @@ def optimize_cross_asset(
             iterations=0,
         )
     cov = covariance.to_numpy(dtype=float)
-    largest = max(float(np.linalg.eigvalsh((cov + cov.T) / 2).max()), 1e-12)
+    if not np.allclose(cov, cov.T, rtol=1e-10, atol=1e-12):
+        raise ValidationError("covariance must be symmetric")
+    eigenvalues = np.linalg.eigvalsh(cov)
+    if float(eigenvalues.min()) < -1e-12:
+        raise ValidationError("covariance must be positive semidefinite")
+    largest = max(float(eigenvalues.max()), 1e-12)
     step = 0.5 / (risk_aversion * largest + 1.0)
     weights = current.copy()
     linear = np.array([item.linear_cost_bps / 10_000 for item in ordered], dtype=float)
@@ -617,9 +658,7 @@ def optimize_cross_asset(
         account_id=portfolio_snapshot.account_id,
         base_currency=portfolio_snapshot.base_currency,
         quantities=quantities,
-        weights=MappingProxyType(
-            dict(sorted(zip(assets, (float(value) for value in weights), strict=True)))
-        ),
+        weights=_realized_weights(quantities, portfolio_snapshot, ordered),
     )
     return CrossAssetOptimizationResult(True, target, report, None, iteration)
 
@@ -640,6 +679,9 @@ def target_to_order_intents(
         raise ValidationError("target and portfolio snapshot must describe the same account")
     if not isinstance(time_in_force, TimeInForce):
         raise ValidationError("time_in_force must be a TimeInForce")
+    expected_ids = {item.instrument.instrument_id for item in ordered}
+    if set(target.quantities) != expected_ids:
+        raise ValidationError("target instruments must exactly match cross-asset inputs")
     current = {
         position.instrument_id: _decimal(position.quantity)
         for position in portfolio_snapshot.positions

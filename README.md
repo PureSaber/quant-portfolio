@@ -6,6 +6,7 @@ A small, reviewable portfolio of quantitative-research engineering patterns:
 - causal signal construction with no look-ahead;
 - transparent transaction-cost accounting;
 - multi-strategy portfolio allocation;
+- causal cross-asset long/short target construction with QExec order suggestions;
 - reproducible YAML-driven runs, tests, and machine-readable artifacts.
 
 > **Disclosure:** every market series and demonstration result in this repository is synthetic. This repository contains no employer data, client data, real trades, internal strategy parameters, or claims of live investment performance.
@@ -67,11 +68,25 @@ The optimizer uses a shrinkage/PSD-repaired covariance matrix and enforces budge
 and turnover while charging linear costs. The Python API additionally supports group caps and the
 square-root market-impact model.
 
+## Cross-asset target API
+
+`quant_portfolio.optimize_cross_asset` consumes an immutable QExec `PortfolioRiskSnapshot`,
+QDK `InstrumentSpec`, and explicit point-in-time price, FX and ADV observations. It supports
+long/short, cash-aware gross/net leverage, instrument/asset-class/currency/venue/strategy caps,
+margin, turnover, participation, liquidation-horizon, linear-cost and square-root-impact limits.
+It either returns a deterministic `TargetPortfolio` plus a fixed-point report, or a structured
+failure containing the binding constraints. `target_to_order_intents` is the only output path;
+it emits QExec `OrderIntent` suggestions and never alters a ledger, positions, or cash.
+
+The module has no live-order, network, or credential capability. Missing, future, duplicate, or
+non-finite PIT inputs fail closed.
+
 ## Repository map
 
 ```text
 src/quant_portfolio/
 ├── allocator.py           # multi-book allocation and optional factor tilt
+├── cross_asset.py          # causal cross-asset targets -> QExec OrderIntent suggestions
 ├── cli.py                 # command-line interface
 └── synthetic_spread.py    # synthetic generator + causal, cost-aware demo
 configs/

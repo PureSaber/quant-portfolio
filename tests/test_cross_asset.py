@@ -219,6 +219,66 @@ def test_cross_asset_golden_a_share_futures_crypto_is_cash_aware() -> None:
     )
 
 
+def test_crypto_spot_is_supported_by_the_same_cash_aware_contract() -> None:
+    spot = CrossAssetInput(
+        instrument("CRYPTO:ETH-USDT-SPOT", AssetClass.CRYPTO, "BINANCE"),
+        pit("2000"),
+        "spot-alpha",
+        0.05,
+        0.04,
+        linear_cost_bps=4,
+    )
+    spot_snapshot = PortfolioRiskSnapshot(
+        account_id="paper-spot",
+        event_time=DECISION_TIME,
+        base_currency="USD",
+        nav=fp("100000"),
+        cash_value=fp("98000"),
+        gross_exposure=fp("2000"),
+        net_exposure=fp("2000"),
+        initial_margin=fp("0"),
+        maintenance_margin=fp("0"),
+        positions=(
+            PositionRiskSnapshot(
+                instrument_id=spot.instrument.instrument_id,
+                asset_class=AssetClass.CRYPTO,
+                venue="BINANCE",
+                settlement_currency="USD",
+                quantity=fp("1", 0),
+                mark_price=fp("2000"),
+                base_notional=fp("2000"),
+                initial_margin=fp("0"),
+                maintenance_margin=fp("0"),
+            ),
+        ),
+    )
+    result = optimize_cross_asset(
+        pd.Series([0.05], index=[spot.instrument.instrument_id]),
+        pd.DataFrame(
+            [[0.04]],
+            index=[spot.instrument.instrument_id],
+            columns=[spot.instrument.instrument_id],
+        ),
+        portfolio_snapshot=spot_snapshot,
+        decision_time=DECISION_TIME,
+        inputs=(spot,),
+        constraints=constraints(
+            asset_class_caps={"crypto": 0.7},
+            currency_caps={"usd": 1.5},
+            venue_caps={"binance": 0.7},
+            strategy_caps={"spot-alpha": 0.7},
+        ),
+    )
+    assert result.feasible and result.target and result.report
+    assert result.report.cash_residual.to_decimal() >= 0
+    assert all(
+        intent.instrument_id == "CRYPTO:ETH-USDT-SPOT"
+        for intent in target_to_order_intents(
+            result.target, portfolio_snapshot=spot_snapshot, inputs=(spot,)
+        )
+    )
+
+
 def test_cross_asset_target_emits_only_deterministic_order_intents() -> None:
     result = optimize()
     assert result.target is not None
@@ -400,6 +460,29 @@ def test_contract_constructors_reject_invalid_values(factory, message: str) -> N
         factory()
 
 
+@pytest.mark.parametrize(
+    "field_name",
+    (
+        "daily_volatility",
+        "linear_cost_bps",
+        "impact_coefficient",
+        "initial_margin_rate",
+        "maintenance_margin_rate",
+    ),
+)
+def test_negative_cost_risk_and_margin_inputs_fail_closed(field_name: str) -> None:
+    with pytest.raises(ValidationError, match=field_name):
+        replace(inputs()[0], **{field_name: -0.01})
+
+
+def test_case_insensitive_caps_have_one_consistent_meaning() -> None:
+    result = optimize(constraints=constraints(currency_caps={"usd": 0.1}))
+    assert not result.feasible and result.failure
+    assert any(binding.code == "CURRENCY" for binding in result.failure.bindings)
+    with pytest.raises(ValidationError, match="unique ignoring case"):
+        constraints(currency_caps={"USD": 0.5, "usd": 0.4})
+
+
 def test_target_portfolio_contract_rejects_bad_public_values() -> None:
     base = {
         "decision_time": DECISION_TIME,
@@ -463,10 +546,34 @@ def test_optimizer_and_order_conversion_reject_invalid_boundary_contracts() -> N
         )
     with pytest.raises(ValidationError, match="max_iterations"):
         optimize(max_iterations=0)
+    with pytest.raises(ValidationError, match="tolerance"):
+        optimize(tolerance=0)
     with pytest.raises(ValidationError, match="expected_returns index"):
         optimize_cross_asset(
             returns.sort_index(ascending=False),
             covariance,
+            portfolio_snapshot=snapshot(),
+            decision_time=DECISION_TIME,
+            inputs=inputs(),
+            constraints=constraints(),
+        )
+    asymmetric = covariance.copy()
+    asymmetric.iloc[0, 1] = 0.1
+    with pytest.raises(ValidationError, match="symmetric"):
+        optimize_cross_asset(
+            returns,
+            asymmetric,
+            portfolio_snapshot=snapshot(),
+            decision_time=DECISION_TIME,
+            inputs=inputs(),
+            constraints=constraints(),
+        )
+    indefinite = covariance.copy()
+    indefinite.iloc[0, 0] = -0.1
+    with pytest.raises(ValidationError, match="positive semidefinite"):
+        optimize_cross_asset(
+            returns,
+            indefinite,
             portfolio_snapshot=snapshot(),
             decision_time=DECISION_TIME,
             inputs=inputs(),
@@ -485,6 +592,17 @@ def test_optimizer_and_order_conversion_reject_invalid_boundary_contracts() -> N
     )
     with pytest.raises(ValidationError, match="same account"):
         target_to_order_intents(target, portfolio_snapshot=snapshot(), inputs=inputs())
+    incomplete_target = TargetPortfolio(
+        decision_time=DECISION_TIME,
+        account_id="paper-m5",
+        base_currency="USD",
+        quantities={"ASHARE:600000": fp("1000", 0)},
+        weights={"ASHARE:600000": 0.1},
+    )
+    with pytest.raises(ValidationError, match="exactly match"):
+        target_to_order_intents(
+            incomplete_target, portfolio_snapshot=snapshot(), inputs=inputs()
+        )
 
 
 def test_quantization_is_toward_zero_and_zero_orders_are_not_emitted() -> None:

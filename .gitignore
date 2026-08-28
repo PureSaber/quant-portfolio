@@ -1,8 +1,11 @@
 .venv/
+.venv-m5/
 __pycache__/
+.coverage
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
 dist/
 build/
 state/
+validation-logs/

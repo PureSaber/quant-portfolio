@@ -18,6 +18,7 @@ from quant_portfolio.cross_asset import (
     PITFixedPoint,
     PITMarketSnapshot,
     TargetPortfolio,
+    _decimal,
     _project_weights,
     _quantize_quantity,
     optimize_cross_asset,
@@ -409,6 +410,181 @@ def test_contract_boundaries_and_invalid_constraints_fail_closed() -> None:
             base_currency="USD",
             quantities={"Z": fp("1", 0), "A": fp("1", 0)},
             weights={"A": 0.0, "Z": 0.0},
+        )
+
+
+def test_cross_asset_public_type_and_mapping_boundaries_fail_closed() -> None:
+    with pytest.raises(ValidationError, match="public values must be FixedPoint"):
+        _decimal("10")  # type: ignore[arg-type]
+    with pytest.raises(ValidationError, match="instrument must be an InstrumentSpec"):
+        CrossAssetInput("not-an-instrument", pit("10"), "s", 0.1, 0.1)  # type: ignore[arg-type]
+    with pytest.raises(ValidationError, match="market must be a PITMarketSnapshot"):
+        CrossAssetInput(instrument("X", AssetClass.EQUITY, "SSE"), "not-a-market", "s", 0.1, 0.1)  # type: ignore[arg-type]
+    with pytest.raises(ValidationError, match="keys must be non-empty strings"):
+        constraints(asset_class_caps={"": 0.5})
+    with pytest.raises(ValidationError, match="min_cash_base must be FixedPoint"):
+        constraints(min_cash_base=100)  # type: ignore[arg-type]
+    with pytest.raises(ValidationError, match="min_net_leverage must be finite"):
+        constraints(min_net_leverage=float("nan"))
+
+
+def test_cross_asset_input_lifecycle_and_inverse_contracts_fail_closed() -> None:
+    future_effective = replace(
+        inputs()[0].instrument, effective_from=DECISION_TIME + timedelta(seconds=1)
+    )
+    with pytest.raises(ValidationError, match="not effective"):
+        optimize(inputs=(replace(inputs()[0], instrument=future_effective), *inputs()[1:]))
+
+    inverse = replace(inputs()[0].instrument, inverse=True)
+    with pytest.raises(ValidationError, match="inverse instruments"):
+        optimize(inputs=(replace(inputs()[0], instrument=inverse), *inputs()[1:]))
+
+
+def test_cross_asset_optimizer_input_and_snapshot_types_fail_closed() -> None:
+    returns, covariance = expected()
+    with pytest.raises(ValidationError, match="QExec PortfolioRiskSnapshot"):
+        optimize_cross_asset(
+            returns,
+            covariance,
+            portfolio_snapshot=object(),  # type: ignore[arg-type]
+            decision_time=DECISION_TIME,
+            inputs=inputs(),
+            constraints=constraints(),
+        )
+    with pytest.raises(ValidationError, match="at least one"):
+        optimize_cross_asset(
+            pd.Series(dtype=float),
+            pd.DataFrame(),
+            portfolio_snapshot=snapshot(),
+            decision_time=DECISION_TIME,
+            inputs=(),
+            constraints=constraints(),
+        )
+    with pytest.raises(ValidationError, match="portfolio NAV must be positive"):
+        optimize_cross_asset(
+            returns,
+            covariance,
+            portfolio_snapshot=replace(snapshot(), nav=fp("0")),
+            decision_time=DECISION_TIME,
+            inputs=inputs(),
+            constraints=constraints(),
+        )
+    with pytest.raises(ValidationError, match="expected_returns must be a pandas Series"):
+        optimize_cross_asset(
+            returns.tolist(),  # type: ignore[arg-type]
+            covariance,
+            portfolio_snapshot=snapshot(),
+            decision_time=DECISION_TIME,
+            inputs=inputs(),
+            constraints=constraints(),
+        )
+    with pytest.raises(ValidationError, match="covariance must be a pandas DataFrame"):
+        optimize_cross_asset(
+            returns,
+            covariance.to_numpy().tolist(),  # type: ignore[arg-type]
+            portfolio_snapshot=snapshot(),
+            decision_time=DECISION_TIME,
+            inputs=inputs(),
+            constraints=constraints(),
+        )
+    invalid_covariance = covariance.copy()
+    invalid_covariance.iloc[0, 0] = np.nan
+    with pytest.raises(ValidationError, match="covariance must contain finite"):
+        optimize_cross_asset(
+            returns,
+            invalid_covariance,
+            portfolio_snapshot=snapshot(),
+            decision_time=DECISION_TIME,
+            inputs=inputs(),
+            constraints=constraints(),
+        )
+
+
+def test_projection_covers_empty_sign_buckets_unknown_mapping_and_turnover() -> None:
+    upper_only = _project_weights(
+        np.array([-0.5, -0.5, -0.5]),
+        np.zeros(3),
+        inputs(),
+        constraints(
+            max_gross_leverage=6.0,
+            max_single_instrument=2.0,
+            min_net_leverage=-3.0,
+            max_net_leverage=-2.0,
+            max_turnover=10.0,
+        ),
+    )
+    assert np.allclose(upper_only, [-0.5, -0.5, -0.5])
+
+    lower_only = _project_weights(
+        np.array([0.5, 0.5, 0.5]),
+        np.zeros(3),
+        inputs(),
+        constraints(
+            max_gross_leverage=6.0,
+            max_single_instrument=2.0,
+            min_net_leverage=2.0,
+            max_net_leverage=3.0,
+            max_turnover=10.0,
+        ),
+    )
+    assert np.allclose(lower_only, [0.5, 0.5, 0.5])
+
+    lower_with_negative = _project_weights(
+        np.array([-0.5, -0.5, -0.5]),
+        np.zeros(3),
+        inputs(),
+        constraints(
+            max_gross_leverage=6.0,
+            max_single_instrument=2.0,
+            min_net_leverage=-1.0,
+            max_net_leverage=1.0,
+            max_turnover=10.0,
+        ),
+    )
+    assert np.sum(lower_with_negative) >= -1.0 - 1e-10
+
+    turnover_limited = _project_weights(
+        np.array([0.5, -0.5, 0.5]),
+        np.zeros(3),
+        inputs(),
+        constraints(max_turnover=0.1),
+    )
+    assert np.abs(turnover_limited).sum() <= 0.1 + 1e-10
+    unknown_bucket = _project_weights(
+        np.array([0.1, 0.1, 0.1]),
+        np.zeros(3),
+        inputs(),
+        constraints(asset_class_caps={"unknown": 0.1}),
+    )
+    assert np.allclose(unknown_bucket, [0.1, 0.1, 0.1])
+
+
+@pytest.mark.parametrize(
+    ("change", "binding"),
+    [
+        ({"min_net_leverage": 0.5}, "NET_LEVERAGE_MIN"),
+        ({"max_net_leverage": 0.1}, "NET_LEVERAGE_MAX"),
+        ({"min_cash_base": fp("90000")}, "CASH"),
+    ],
+)
+def test_current_portfolio_reports_net_and_cash_constraint_bindings(
+    change: dict[str, object], binding: str
+) -> None:
+    result = optimize(constraints=constraints(**change))
+    assert not result.feasible and result.failure is not None
+    assert binding in {item.code for item in result.failure.bindings}
+
+
+def test_optimizer_iteration_limit_and_order_time_in_force_fail_closed() -> None:
+    result = optimize(max_iterations=1, tolerance=1e-30)
+    assert result.iterations == 1
+    assert result.target is not None
+    with pytest.raises(ValidationError, match="time_in_force must be a TimeInForce"):
+        target_to_order_intents(
+            result.target,
+            portfolio_snapshot=snapshot(),
+            inputs=inputs(),
+            time_in_force="DAY",  # type: ignore[arg-type]
         )
 
 

@@ -28,7 +28,30 @@ jobs:
         run: ruff check src tests scripts
 
       - name: Pytest with coverage gate
-        run: pytest -q
+        run: pytest -q --cov-report=json:coverage.json
+
+      - name: Core pure branch coverage gate
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          key = str(Path("src/quant_portfolio/cross_asset.py"))
+          coverage = json.loads(Path("coverage.json").read_text(encoding="utf-8"))
+          files = coverage["files"]
+          entry = files.get(key) or files.get(key.replace(chr(92), "/"))
+          if entry is None:
+              raise SystemExit(f"missing coverage entry for {key}")
+          summary = entry["summary"]
+          covered = summary["covered_branches"]
+          total = summary["num_branches"]
+          if total == 0 or covered / total < 0.90:
+              raise SystemExit(
+                  f"cross_asset.py pure branch coverage {covered}/{total} "
+                  f"({covered / total:.2%}) is below 90%"
+              )
+          print(f"cross_asset.py pure branch coverage: {covered}/{total} ({covered / total:.2%})")
 
       - name: Run deterministic synthetic demo
         run: |

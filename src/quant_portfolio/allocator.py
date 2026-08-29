@@ -56,7 +56,11 @@ def _read_factor_scores(path: Path, column: str) -> pd.Series:
         raise ValueError(f"factor column {column} missing in {path}")
     if "symbol" not in df.columns:
         raise ValueError(f"factor scores need symbol column: {path}")
-    latest = df.sort_values("date").groupby("symbol", as_index=False).tail(1) if "date" in df.columns else df
+    latest = (
+        df.sort_values("date").groupby("symbol", as_index=False).tail(1)
+        if "date" in df.columns
+        else df
+    )
     scores = latest.set_index("symbol")[column].astype(float)
     return scores
 

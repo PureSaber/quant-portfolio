@@ -776,9 +776,7 @@ def test_optimizer_and_order_conversion_reject_invalid_boundary_contracts() -> N
         weights={"ASHARE:600000": 0.1},
     )
     with pytest.raises(ValidationError, match="exactly match"):
-        target_to_order_intents(
-            incomplete_target, portfolio_snapshot=snapshot(), inputs=inputs()
-        )
+        target_to_order_intents(incomplete_target, portfolio_snapshot=snapshot(), inputs=inputs())
 
 
 def test_quantization_is_toward_zero_and_zero_orders_are_not_emitted() -> None:

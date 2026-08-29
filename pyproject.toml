@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quant-portfolio"
-version = "0.4.0"
+version = "0.4.1"
 description = "Sanitized quantitative research and portfolio engineering demos"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 dependencies = [
-    "quant-data-kit @ git+https://github.com/PureSaber/quant-data-kit.git@v0.6.0",
-    "quant-execution @ git+https://github.com/PureSaber/quant-execution.git@v0.4.0",
+    "quant-data-kit @ git+https://github.com/PureSaber/quant-data-kit.git@v0.6.1",
+    "quant-execution @ git+https://github.com/PureSaber/quant-execution.git@v0.4.1",
     "pandas>=2.0",
     "pyarrow>=14.0",
     "pyyaml>=6.0",
@@ -19,7 +19,22 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.4", "pytest-cov>=5.0", "ruff>=0.9.0"]
+dev = [
+    "exceptiongroup>=1",
+    "pytest>=7.4",
+    "pytest-cov>=5.0",
+    "ruff==0.16.5",
+    "tomli>=2.0; python_version < '3.11'",
+]
+
+[tool.quant-workspace]
+layer = "portfolio-risk"
+schemas = [
+    { id = "puresaber.instrument-spec", version = "2.0.0" },
+    { id = "puresaber.execution.account-snapshot", version = "1.1.0" },
+    { id = "puresaber.execution.order-intent", version = "1.1.0" },
+]
+lock-files = ["requirements.lock"]
 
 [project.scripts]
 quant-portfolio = "quant_portfolio.cli:main"

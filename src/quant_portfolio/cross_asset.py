@@ -57,11 +57,7 @@ def _finite_positive(value: float, field_name: str) -> None:
 
 
 def _finite(value: float, field_name: str) -> None:
-    if (
-        not isinstance(value, (int, float))
-        or isinstance(value, bool)
-        or not isfinite(value)
-    ):
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not isfinite(value):
         raise ValidationError(f"{field_name} must be finite")
 
 
@@ -586,7 +582,11 @@ def optimize_cross_asset(
     """Return a constrained target or a structured, fail-closed infeasibility result."""
     _finite_positive(risk_aversion, "risk_aversion")
     _finite_positive(tolerance, "tolerance")
-    if not isinstance(max_iterations, int) or isinstance(max_iterations, bool) or max_iterations <= 0:
+    if (
+        not isinstance(max_iterations, int)
+        or isinstance(max_iterations, bool)
+        or max_iterations <= 0
+    ):
         raise ValidationError("max_iterations must be a positive integer")
     if not isinstance(expected_returns, pd.Series):
         raise ValidationError("expected_returns must be a pandas Series")

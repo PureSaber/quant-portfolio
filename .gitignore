@@ -1,7 +1,10 @@
 .venv/
 .venv-m5/
+.venv-lock310/
+.venv-m6-*/
 __pycache__/
 .coverage
+coverage.json
 *.egg-info/
 .pytest_cache/
 .ruff_cache/

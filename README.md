@@ -26,7 +26,10 @@ A small, reviewable portfolio of quantitative-research engineering patterns:
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
+python -m pip install --no-deps -r requirements.lock
+python -m pip check
+python -m pip install --no-deps --no-build-isolation -e .
+python -m pip check
 pytest -q
 python scripts/run_synthetic_demo.py
 ```
@@ -80,6 +83,30 @@ it emits QExec `OrderIntent` suggestions and never alters a ledger, positions, o
 
 The module has no live-order, network, or credential capability. Missing, future, duplicate, or
 non-finite PIT inputs fail closed.
+
+## M6 governance and reproducibility
+
+Version `0.4.1` consumes only published annotated internal tags:
+
+- `quant-data-kit v0.6.1` (`edf1351690dc60691cc6330390adcdbf8bc79c5f`)
+- `quant-execution v0.4.1` (`29eccc0e392968b5f7c31976a329605aacce369a`)
+
+`[tool.quant-workspace]` declares the real QDK `puresaber.instrument-spec` input and QExec
+`puresaber.execution.account-snapshot`/`puresaber.execution.order-intent` boundaries. The
+portfolio optimizer only reads snapshots and emits order suggestions; it cannot alter the ledger.
+`requirements.lock` is the sole audited Python3.10-3.12 lock for runtime, development, and
+editable-build requirements. Rebuild it only from Python3.10 with:
+
+```bash
+python -m piptools compile --extra dev --build-deps-for editable --allow-unsafe --strip-extras \
+  --resolver backtracking --index-url https://pypi.org/simple \
+  --constraint requirements-constraints.txt --output-file requirements.lock pyproject.toml
+```
+
+Run the four locked installation commands above, Ruff check/format, the full test suite, and the
+synthetic demo before proposing a release. To roll back this governance update, use `git revert`
+for the governing commit so `pyproject.toml`, constraints, and `requirements.lock` move together;
+never move, delete, or recreate existing tags or historical research artifacts.
 
 ## Repository map
 

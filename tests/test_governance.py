@@ -15,7 +15,7 @@ def test_workspace_declaration_and_internal_release_tags_are_locked() -> None:
     project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     workspace = project["tool"]["quant-workspace"]
 
-    assert project["project"]["version"] == "0.4.1"
+    assert project["project"]["version"] == "0.4.2"
     assert workspace["layer"] == "portfolio-risk"
     assert workspace["schemas"] == [
         {"id": "puresaber.instrument-spec", "version": "2.0.0"},
@@ -26,16 +26,16 @@ def test_workspace_declaration_and_internal_release_tags_are_locked() -> None:
 
     dependencies = project["project"]["dependencies"]
     assert (
-        "quant-data-kit @ git+https://github.com/PureSaber/quant-data-kit.git@v0.6.1"
+        "quant-data-kit @ git+https://github.com/PureSaber/quant-data-kit.git@v0.8.1"
         in dependencies
     )
     assert (
-        "quant-execution @ git+https://github.com/PureSaber/quant-execution.git@v0.4.1"
+        "quant-execution @ git+https://github.com/PureSaber/quant-execution.git@v0.5.1"
         in dependencies
     )
 
     lock = (ROOT / "requirements.lock").read_text(encoding="utf-8")
-    assert "quant-data-kit @ git+https://github.com/PureSaber/quant-data-kit.git@v0.6.1" in lock
-    assert "quant-execution @ git+https://github.com/PureSaber/quant-execution.git@v0.4.1" in lock
+    assert "quant-data-kit @ git+https://github.com/PureSaber/quant-data-kit.git@v0.8.1" in lock
+    assert "quant-execution @ git+https://github.com/PureSaber/quant-execution.git@v0.5.1" in lock
     assert 'tomli==2.4.1 ; python_version < "3.11"' in lock
     assert "exceptiongroup==1.3.1" in lock

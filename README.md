@@ -86,10 +86,10 @@ non-finite PIT inputs fail closed.
 
 ## M6 governance and reproducibility
 
-Version `0.4.1` consumes only published annotated internal tags:
+Version `0.4.2` consumes only published annotated internal tags:
 
-- `quant-data-kit v0.6.1` (`edf1351690dc60691cc6330390adcdbf8bc79c5f`)
-- `quant-execution v0.4.1` (`29eccc0e392968b5f7c31976a329605aacce369a`)
+- `quant-data-kit v0.8.1` (`8f258f11be8e4d8edddcd41b79b817bd6c925970`)
+- `quant-execution v0.5.1` (`15e4e5c9dbaf2fe9b438732b2e94db295d5ea58c`)
 
 `[tool.quant-workspace]` declares the real QDK `puresaber.instrument-spec` input and QExec
 `puresaber.execution.account-snapshot`/`puresaber.execution.order-intent` boundaries. The

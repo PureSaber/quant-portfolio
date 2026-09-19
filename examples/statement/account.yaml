@@ -1,0 +1,13 @@
+# SYNTHETIC EXAMPLE. Copy to a private directory and replace with statement data.
+opening_at: "2026-09-17T15:00:00+08:00"
+as_of: "2026-09-18T15:00:00+08:00"
+opening_cash: "1000"
+closing_cash: "2595"
+opening_positions: opening_positions.csv
+closing_positions: closing_positions.csv
+trades: trades.csv
+cash_flows: cash_flows.csv
+prices: prices.csv
+managed_symbols: ["000001"]
+limits: {max_single_weight: "0.30", cash_buffer: "0.05"}
+costs: {commission: "0.0003", min_commission: "5", stamp_tax: "0.0005", slippage: "0.001"}

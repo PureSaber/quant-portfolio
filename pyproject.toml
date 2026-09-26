@@ -10,8 +10,8 @@ readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 dependencies = [
-    "quant-data-kit @ git+https://github.com/PureSaber/quant-data-kit.git@5b68af566ee1d47f62caa5449719912df6e17983",
-    "quant-execution @ git+https://github.com/PureSaber/quant-execution.git@67164347c0a1fbb3e4f7a1b49ab9b172d02e86db",
+    "quant-data-kit @ git+https://github.com/PureSaber/quant-data-kit.git@4248bfdf4dcf525962e3c19f5f2c5b5fa5222534",
+    "quant-execution @ git+https://github.com/PureSaber/quant-execution.git@7f44d5a77ebbc6eb5e3714d4c28c109ec2ca0011",
     "pandas>=2.0",
     "pyarrow>=14.0",
     "pyyaml>=6.0",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -27,6 +28,187 @@ class OptimizationResult:
     group_weights: dict[str, float]
     converged: bool
     iterations: int
+
+
+_RESEARCH_ALLOCATION_FIELDS = {
+    "mode",
+    "lookback",
+    "min_observations",
+    "covariance_shrinkage",
+    "risk_aversion",
+    "turnover_penalty",
+    "max_turnover",
+}
+
+
+def validate_research_allocation(value: Mapping[str, object]) -> dict[str, object]:
+    """Validate and normalize the closed research-allocation recipe fragment."""
+
+    if not isinstance(value, Mapping):
+        raise TypeError("allocation must be a mapping")
+    unknown = set(value) - _RESEARCH_ALLOCATION_FIELDS
+    if unknown:
+        raise ValueError(f"allocation contains unknown fields: {sorted(unknown)}")
+    mode = value.get("mode")
+    if mode not in {"equal", "inverse_vol", "cost_aware"}:
+        raise ValueError("allocation.mode must be equal, inverse_vol or cost_aware")
+
+    def integer(name: str, default: int) -> int:
+        result = value.get(name, default)
+        if isinstance(result, bool) or not isinstance(result, int):
+            raise TypeError(f"allocation.{name} must be an integer")
+        return result
+
+    def number(name: str, default: float) -> float:
+        result = value.get(name, default)
+        if isinstance(result, bool) or not isinstance(result, (int, float)):
+            raise TypeError(f"allocation.{name} must be numeric")
+        result = float(result)
+        if not np.isfinite(result):
+            raise ValueError(f"allocation.{name} must be finite")
+        return result
+
+    lookback = integer("lookback", 20)
+    min_observations = integer("min_observations", 10)
+    shrinkage = number("covariance_shrinkage", 0.2)
+    risk_aversion = number("risk_aversion", 5.0)
+    turnover_penalty = number("turnover_penalty", 0.0)
+    max_turnover = number("max_turnover", 1.0)
+    if lookback < 2:
+        raise ValueError("allocation.lookback must be at least 2")
+    if not 2 <= min_observations <= lookback:
+        raise ValueError("allocation.min_observations must be between 2 and lookback")
+    if not 0 <= shrinkage <= 1:
+        raise ValueError("allocation.covariance_shrinkage must be in [0, 1]")
+    if risk_aversion <= 0:
+        raise ValueError("allocation.risk_aversion must be positive")
+    if turnover_penalty < 0:
+        raise ValueError("allocation.turnover_penalty must be non-negative")
+    if not 0 <= max_turnover <= 2:
+        raise ValueError("allocation.max_turnover must be in [0, 2]")
+    return {
+        "mode": mode,
+        "lookback": lookback,
+        "min_observations": min_observations,
+        "covariance_shrinkage": shrinkage,
+        "risk_aversion": risk_aversion,
+        "turnover_penalty": turnover_penalty,
+        "max_turnover": max_turnover,
+    }
+
+
+def research_allocation_weights(
+    scores: pd.Series,
+    trailing_returns: pd.DataFrame | None,
+    current_weights: pd.Series | None,
+    linear_costs: pd.Series | None,
+    *,
+    invested_limit: float,
+    max_weight: float,
+    config: Mapping[str, object],
+) -> pd.Series:
+    """Build long-only research weights with one explicit, closed allocation policy.
+
+    ``cost_aware`` delegates its optimization to :func:`optimize_mean_variance`.
+    The other modes use the same box/simplex projection, so every mode obeys the
+    declared invested sleeve and per-name cap.
+    """
+
+    settings = validate_research_allocation(config)
+    if not isinstance(scores, pd.Series) or scores.empty or not scores.index.is_unique:
+        raise ValueError("scores must be a non-empty Series with unique assets")
+    numeric_scores = pd.to_numeric(scores, errors="coerce").astype(float)
+    if not np.isfinite(numeric_scores).all():
+        raise ValueError("scores must be finite for every asset")
+    if (
+        isinstance(invested_limit, bool)
+        or not isinstance(invested_limit, (int, float))
+        or not np.isfinite(invested_limit)
+        or not 0 < invested_limit <= 1
+    ):
+        raise ValueError("invested_limit must be in (0, 1]")
+    if (
+        isinstance(max_weight, bool)
+        or not isinstance(max_weight, (int, float))
+        or not np.isfinite(max_weight)
+        or not 0 < max_weight <= 1
+    ):
+        raise ValueError("max_weight must be in (0, 1]")
+    assets = list(numeric_scores.index)
+    if len(assets) * float(max_weight) + 1e-12 < float(invested_limit):
+        raise ValueError("asset count and max_weight cannot satisfy invested_limit")
+
+    total = float(invested_limit)
+    cap = float(max_weight)
+    mode = str(settings["mode"])
+    if mode == "equal":
+        return pd.Series(total / len(assets), index=assets, name="weight")
+
+    if not isinstance(trailing_returns, pd.DataFrame):
+        raise TypeError(f"{mode} allocation requires trailing_returns")
+    window = (
+        trailing_returns.reindex(columns=assets)
+        .tail(int(settings["lookback"]))
+        .apply(pd.to_numeric, errors="coerce")
+    )
+    counts = window.notna().sum()
+    missing = sorted(counts[counts < int(settings["min_observations"])].index.astype(str))
+    if missing:
+        raise ValueError(f"allocation return history is insufficient: {missing}")
+    if not np.isfinite(window.to_numpy(dtype=float)[~window.isna().to_numpy()]).all():
+        raise ValueError("allocation return history must be finite")
+
+    if mode == "inverse_vol":
+        volatility = window.std(ddof=1)
+        if not np.isfinite(volatility).all() or (volatility <= 0).any():
+            raise ValueError("inverse_vol requires positive finite volatility for every asset")
+        raw = (1.0 / volatility).to_numpy(dtype=float)
+        raw = raw / raw.sum() * total
+        weights = _project_box_simplex(raw, 0.0, cap, total=total)
+        return pd.Series(weights, index=assets, name="weight")
+
+    covariance = estimate_covariance(
+        window,
+        shrinkage=float(settings["covariance_shrinkage"]),
+    )
+    current = (
+        pd.Series(0.0, index=assets)
+        if current_weights is None
+        else pd.to_numeric(current_weights.reindex(assets).fillna(0.0), errors="coerce")
+    )
+    costs = (
+        pd.Series(0.0, index=assets)
+        if linear_costs is None
+        else pd.to_numeric(linear_costs.reindex(assets), errors="coerce")
+    )
+    if (
+        not np.isfinite(current.to_numpy(dtype=float)).all()
+        or (current < 0).any()
+        or not np.isfinite(costs.to_numpy(dtype=float)).all()
+        or (costs < 0).any()
+    ):
+        raise ValueError("current_weights and linear_costs must be finite and non-negative")
+    sleeve_current = current / total
+    sleeve_sum = float(sleeve_current.sum())
+    if sleeve_sum <= 0:
+        sleeve_current = pd.Series(1.0 / len(assets), index=assets)
+    else:
+        sleeve_current /= sleeve_sum
+    result = optimize_mean_variance(
+        numeric_scores,
+        covariance,
+        current_weights=sleeve_current,
+        linear_costs=costs,
+        risk_aversion=float(settings["risk_aversion"]),
+        turnover_penalty=float(settings["turnover_penalty"]),
+        constraints=OptimizationConstraints(
+            max_weight=cap / total,
+            max_turnover=min(2.0, float(settings["max_turnover"]) / total),
+        ),
+    )
+    weights = result.weights * total
+    weights.name = "weight"
+    return weights
 
 
 def estimate_covariance(

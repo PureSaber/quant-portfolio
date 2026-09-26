@@ -18,7 +18,9 @@ from quant_portfolio.optimization import (
     estimate_capacity,
     estimate_covariance,
     optimize_mean_variance,
+    research_allocation_weights,
     square_root_impact_cost,
+    validate_research_allocation,
 )
 from quant_portfolio.synthetic_spread import (
     BacktestMetrics,
@@ -47,6 +49,8 @@ __all__ = [
     "generate_synthetic_pair",
     "optimize_cross_asset",
     "optimize_mean_variance",
+    "research_allocation_weights",
     "square_root_impact_cost",
     "target_to_order_intents",
+    "validate_research_allocation",
 ]

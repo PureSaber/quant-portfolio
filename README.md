@@ -71,6 +71,14 @@ The optimizer uses a shrinkage/PSD-repaired covariance matrix and enforces budge
 and turnover while charging linear costs. The Python API additionally supports group caps and the
 square-root market-impact model.
 
+Research recipes can call `validate_research_allocation` and
+`research_allocation_weights` with one of three closed modes: `equal`, `inverse_vol`, or
+`cost_aware`. The cost-aware path delegates to the same mean-variance optimizer above. All modes
+return a long-only sleeve whose sum equals the explicit invested limit and whose names obey the
+same absolute position cap. `max_turnover` is measured from the real current portfolio and includes
+selling holdings omitted from the new score set; a budget too small for the required sleeve change
+fails explicitly. Missing return history or non-finite inputs also fail closed.
+
 ## Cross-asset target API
 
 `quant_portfolio.optimize_cross_asset` consumes an immutable QExec `PortfolioRiskSnapshot`,

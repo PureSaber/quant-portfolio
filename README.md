@@ -67,8 +67,12 @@ quant-portfolio optimize \
   --out state/target_portfolio.json
 ```
 
-The optimizer uses a shrinkage/PSD-repaired covariance matrix and enforces budget, asset bounds,
-and turnover while charging linear costs. The Python API additionally supports group caps and the
+The optimizer uses a shrinkage/PSD-repaired covariance matrix and jointly enforces budget, asset
+bounds, turnover, group caps, and optional linear factor-exposure bounds while charging linear
+costs. `factor_exposures` is an asset-by-factor matrix and `factor_bounds` applies absolute target
+portfolio bounds as `lower <= X.T @ weights <= upper`; callers must convert relative-to-benchmark
+bounds before calling the optimizer. Infeasible intersections fail explicitly, and every returned
+portfolio is rechecked against all configured constraints. The Python API also exposes the
 square-root market-impact model.
 
 Research recipes can call `validate_research_allocation` and
@@ -77,7 +81,10 @@ Research recipes can call `validate_research_allocation` and
 return a long-only sleeve whose sum equals the explicit invested limit and whose names obey the
 same absolute position cap. `max_turnover` is measured from the real current portfolio and includes
 selling holdings omitted from the new score set; a budget too small for the required sleeve change
-fails explicitly. Missing return history or non-finite inputs also fail closed.
+fails explicitly. The `cost_aware` mode accepts the same factor inputs plus a validated
+`covariance_override`; its factor bounds retain absolute full-portfolio semantics when the sleeve
+invests less than 100%. Missing model inputs, non-finite values, incomplete covariance estimates,
+and solver non-convergence also fail closed.
 
 ## Cross-asset target API
 

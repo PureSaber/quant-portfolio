@@ -589,9 +589,11 @@ def _project_joint_feasible_set(
     factor_bounds: Mapping[str, tuple[float, float]],
     *,
     tolerance: float,
+    trade_penalties: np.ndarray | None = None,
+    penalty_scale: float = 0.0,
     max_iterations: int = 20_000,
 ) -> np.ndarray:
-    """Project onto the intersection using Dykstra's convex-set algorithm."""
+    """Apply the joint constraint/trading-cost prox using Dykstra's algorithm."""
 
     turnover_radius = constraints.max_turnover - turnover_offset
     if turnover_radius < -tolerance:
@@ -650,7 +652,16 @@ def _project_joint_feasible_set(
                     f"joint constraints are infeasible: factor_bounds[{factor!r}] cannot be "
                     "satisfied with budget and asset bounds"
                 )
-    projectors: list[tuple[str, Callable[[np.ndarray], np.ndarray]]] = [
+    projectors: list[tuple[str, Callable[[np.ndarray], np.ndarray]]] = []
+    if trade_penalties is not None and np.any(trade_penalties > 0):
+        thresholds = penalty_scale * trade_penalties
+
+        def proximal_trade_cost(point: np.ndarray) -> np.ndarray:
+            trade = point - current
+            return current + np.sign(trade) * np.maximum(np.abs(trade) - thresholds, 0.0)
+
+        projectors.append(("trade_cost", proximal_trade_cost))
+    projectors.append(
         (
             "budget_and_bounds",
             lambda point: _project_box_simplex(
@@ -660,7 +671,7 @@ def _project_joint_feasible_set(
                 total=1.0,
             ),
         )
-    ]
+    )
 
     groups = groups_for_bound
     halfspaces: list[tuple[str, np.ndarray, float]] = []
@@ -747,10 +758,11 @@ def optimize_mean_variance(
     max_iterations: int = 2000,
     tolerance: float = 1e-10,
 ) -> OptimizationResult:
-    """Projected-gradient long-only optimizer.
+    """Proximal-gradient long-only optimizer.
 
     Maximizes expected return minus quadratic risk, linear trading costs and an
-    additional turnover penalty. Constraints are enforced on every iteration.
+    additional turnover penalty. The non-smooth trading objective and all
+    constraints share one Dykstra proximal step on every iteration.
     """
     if not isinstance(expected_returns, pd.Series):
         raise TypeError("expected_returns must be a pandas Series")
@@ -880,9 +892,7 @@ def optimize_mean_variance(
     converged = False
 
     for iteration in range(1, max_iterations + 1):
-        trade = weights - current
         gradient = mu - risk_aversion * (cov @ weights)
-        gradient -= (costs + turnover_penalty) * np.sign(trade)
         candidate = _project_joint_feasible_set(
             weights + step * gradient,
             assets,
@@ -892,6 +902,8 @@ def optimize_mean_variance(
             validated_exposures,
             validated_factor_bounds,
             tolerance=projection_tolerance,
+            trade_penalties=costs + turnover_penalty,
+            penalty_scale=step,
         )
         if float(np.max(np.abs(candidate - weights))) <= tolerance:
             weights = candidate

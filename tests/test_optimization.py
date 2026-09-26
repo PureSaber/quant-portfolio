@@ -341,3 +341,19 @@ def test_research_cost_aware_rejects_optimizer_non_convergence(
             config={"mode": "cost_aware"},
             covariance_override=pd.DataFrame(np.eye(2), index=assets, columns=assets),
         )
+
+
+def test_linear_cost_kink_uses_stable_proximal_convergence() -> None:
+    assets = ["A", "B"]
+    current = pd.Series([0.7, 0.3], index=assets)
+    result = optimize_mean_variance(
+        pd.Series(0.0, index=assets),
+        pd.DataFrame(np.eye(2) * 0.01, index=assets, columns=assets),
+        current_weights=current,
+        linear_costs=pd.Series(0.1, index=assets),
+        constraints=OptimizationConstraints(max_weight=1.0, max_turnover=2.0),
+    )
+
+    assert result.converged
+    assert result.iterations == 1
+    assert result.weights.to_dict() == pytest.approx(current.to_dict())

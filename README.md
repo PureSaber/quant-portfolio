@@ -103,8 +103,8 @@ non-finite PIT inputs fail closed.
 
 Version `0.4.2` consumes only published annotated internal tags:
 
-- `quant-data-kit v0.8.1` (`db5e37d2aae43dc896a5d4b8ed43fad7840d770f`)
-- `quant-execution v0.5.1` (`b29dcc3cab26e9b4cc11f0021d5d1b5d43fb900e`)
+- `quant-data-kit v0.8.1` (`b5621379e1a15562371be31c03f354a6acf512e4`)
+- `quant-execution v0.5.1` (`99ab9b1445d72164fa4e8c6d1ebde859b80dba1f`)
 
 `[tool.quant-workspace]` declares the real QDK `puresaber.instrument-spec` input and QExec
 `puresaber.execution.account-snapshot`/`puresaber.execution.order-intent` boundaries. The

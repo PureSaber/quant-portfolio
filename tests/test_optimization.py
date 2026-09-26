@@ -94,6 +94,74 @@ def test_research_allocation_modes_share_closed_constraints() -> None:
     assert inverse["B"] > inverse["A"]
 
 
+@pytest.mark.parametrize("mode", ["equal", "inverse_vol", "cost_aware"])
+def test_research_allocation_turnover_includes_dropped_holdings(mode: str) -> None:
+    scores = pd.Series({"A": 0.2, "B": 0.1})
+    returns = pd.DataFrame(
+        {
+            "A": [0.01, -0.01, 0.02, -0.02, 0.01],
+            "B": [0.005, 0.004, -0.003, 0.002, -0.004],
+        }
+    )
+    with pytest.raises(ValueError, match="max_turnover is infeasible"):
+        research_allocation_weights(
+            scores,
+            returns,
+            pd.Series({"A": 0.3, "B": 0.3, "DROPPED": 0.4}),
+            pd.Series(0.001, index=scores.index),
+            invested_limit=0.6,
+            max_weight=0.4,
+            config={
+                "mode": mode,
+                "lookback": 5,
+                "min_observations": 5,
+                "max_turnover": 0.3,
+            },
+        )
+
+
+@pytest.mark.parametrize("mode", ["equal", "inverse_vol", "cost_aware"])
+def test_research_allocation_zero_portfolio_does_not_fabricate_current_weights(
+    mode: str,
+) -> None:
+    scores = pd.Series({"A": 0.2, "B": 0.1})
+    returns = pd.DataFrame(
+        {
+            "A": [0.01, -0.01, 0.02, -0.02, 0.01],
+            "B": [0.005, 0.004, -0.003, 0.002, -0.004],
+        }
+    )
+    with pytest.raises(ValueError, match="max_turnover is infeasible"):
+        research_allocation_weights(
+            scores,
+            returns,
+            pd.Series(dtype=float),
+            pd.Series(0.001, index=scores.index),
+            invested_limit=0.6,
+            max_weight=0.4,
+            config={
+                "mode": mode,
+                "lookback": 5,
+                "min_observations": 5,
+                "max_turnover": 0.0,
+            },
+        )
+
+
+def test_equal_allocation_moves_toward_target_within_turnover_limit() -> None:
+    weights = research_allocation_weights(
+        pd.Series({"A": 0.2, "B": 0.1}),
+        None,
+        pd.Series({"A": 0.5, "B": 0.1}),
+        None,
+        invested_limit=0.6,
+        max_weight=0.5,
+        config={"mode": "equal", "max_turnover": 0.2},
+    )
+    assert weights.to_dict() == pytest.approx({"A": 0.4, "B": 0.2})
+    assert (weights - pd.Series({"A": 0.5, "B": 0.1})).abs().sum() <= 0.2 + 1e-12
+
+
 def test_research_allocation_rejects_open_or_unsupported_inputs() -> None:
     normalized = validate_research_allocation({"mode": "equal"})
     assert normalized["lookback"] == 20

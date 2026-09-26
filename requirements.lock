@@ -70,7 +70,7 @@ quant-data-kit @ git+https://github.com/PureSaber/quant-data-kit.git@4248bfdf4dc
     # via
     #   quant-execution
     #   quant-portfolio (pyproject.toml)
-quant-execution @ git+https://github.com/PureSaber/quant-execution.git@7f44d5a77ebbc6eb5e3714d4c28c109ec2ca0011
+quant-execution @ git+https://github.com/PureSaber/quant-execution.git@e0813f65d4d9d4396de58dc50e2e5149b16f117c
     # via quant-portfolio (pyproject.toml)
 referencing==0.37.0
     # via

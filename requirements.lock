@@ -66,11 +66,11 @@ pyyaml==6.0.3
     # via
     #   quant-data-kit
     #   quant-portfolio (pyproject.toml)
-quant-data-kit @ git+https://github.com/PureSaber/quant-data-kit.git@271a65ee383158b3dd7570e19a3f2b4123f09f79
+quant-data-kit @ git+https://github.com/PureSaber/quant-data-kit.git@ba136c2fa2eea121bfb2ad7887b536c3952586f7
     # via
     #   quant-execution
     #   quant-portfolio (pyproject.toml)
-quant-execution @ git+https://github.com/PureSaber/quant-execution.git@1bf6a627abf5a9a0d2cd2c0b4d3ad5740d464b2a
+quant-execution @ git+https://github.com/PureSaber/quant-execution.git@21aace45d2dde6458db8fcda4829f252f8c640f1
     # via quant-portfolio (pyproject.toml)
 referencing==0.37.0
     # via

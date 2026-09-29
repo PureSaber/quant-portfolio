@@ -567,6 +567,136 @@ def _evaluate(
     return report, tuple(bindings)
 
 
+def _shift_quantity(quantity: FixedPoint, steps: int, step: FixedPoint) -> FixedPoint:
+    updated = _decimal(quantity) + Decimal(steps) * _decimal(step)
+    return _fixed(updated, step.scale)
+
+
+def _lot_book_objective(
+    quantities: Mapping[str, FixedPoint],
+    current: np.ndarray,
+    mu: np.ndarray,
+    covariance: np.ndarray,
+    linear: np.ndarray,
+    risk_aversion: float,
+    snapshot: PortfolioRiskSnapshot,
+    inputs: Sequence[CrossAssetInput],
+    constraints: CrossAssetConstraints,
+) -> float | None:
+    _report, bindings = _evaluate(quantities, snapshot, inputs, constraints)
+    if bindings:
+        return None
+    realized = _realized_weights(quantities, snapshot, inputs)
+    weights = np.array(
+        [realized[item.instrument.instrument_id] for item in inputs],
+        dtype=float,
+    )
+    trade = weights - current
+    return float(
+        mu @ weights
+        - 0.5 * risk_aversion * (weights @ covariance @ weights)
+        - linear @ np.abs(trade)
+    )
+
+
+def _refine_lot_quantities(
+    weights: np.ndarray,
+    current: np.ndarray,
+    mu: np.ndarray,
+    covariance: np.ndarray,
+    linear: np.ndarray,
+    risk_aversion: float,
+    snapshot: PortfolioRiskSnapshot,
+    inputs: Sequence[CrossAssetInput],
+    constraints: CrossAssetConstraints,
+) -> Mapping[str, FixedPoint]:
+    """Search one-lot neighbors of the floored target, keeping the book feasible.
+
+    The continuous solution is not the order. Quantity steps are decision
+    variables: the search starts at the toward-zero rounding, falls back to the
+    current holdings when that rounding breaks a constraint, then accepts a
+    one-step change only when it raises the mean-variance objective.
+    """
+
+    floored = dict(_target_quantities(weights, snapshot, inputs))
+    current_quantities = dict(_target_quantities(current, snapshot, inputs))
+
+    def score(candidate: dict[str, FixedPoint]) -> float | None:
+        frozen = MappingProxyType(dict(sorted(candidate.items())))
+        return _lot_book_objective(
+            frozen,
+            current,
+            mu,
+            covariance,
+            linear,
+            risk_aversion,
+            snapshot,
+            inputs,
+            constraints,
+        )
+
+    best = floored
+    best_score = score(best)
+    current_score = score(current_quantities)
+    if current_score is not None and (best_score is None or current_score > best_score):
+        best = current_quantities
+        best_score = current_score
+    if best_score is None:
+        return MappingProxyType(dict(sorted(floored.items())))
+    for item in inputs:
+        instrument_id = item.instrument.instrument_id
+        origin = _decimal(best[instrument_id])
+        destination = _decimal(floored[instrument_id])
+        step_size = _decimal(item.instrument.quantity_step)
+        if step_size == 0 or origin == destination:
+            continue
+        gap = destination - origin
+        high = int((abs(gap) / step_size).to_integral_value(rounding=ROUND_DOWN))
+        direction = 1 if gap > 0 else -1
+        low = 0
+        chosen = 0
+        while low <= high:
+            midpoint = (low + high) // 2
+            trial = dict(best)
+            trial[instrument_id] = _shift_quantity(
+                best[instrument_id], direction * midpoint, item.instrument.quantity_step
+            )
+            trial_score = score(trial)
+            if trial_score is None:
+                high = midpoint - 1
+            else:
+                chosen = midpoint
+                low = midpoint + 1
+        if chosen:
+            landed = dict(best)
+            landed[instrument_id] = _shift_quantity(
+                best[instrument_id], direction * chosen, item.instrument.quantity_step
+            )
+            landed_score = score(landed)
+            if landed_score is not None and landed_score > best_score + 1e-12:
+                best = landed
+                best_score = landed_score
+    for _ in range(len(inputs) * 2):
+        improved = False
+        for item in inputs:
+            instrument_id = item.instrument.instrument_id
+            step = item.instrument.quantity_step
+            for direction in (1, -1):
+                trial = dict(best)
+                trial[instrument_id] = _shift_quantity(best[instrument_id], direction, step)
+                trial_score = score(trial)
+                if trial_score is not None and trial_score > best_score + 1e-12:
+                    best = trial
+                    best_score = trial_score
+                    improved = True
+                    break
+            if improved:
+                break
+        if not improved:
+            break
+    return MappingProxyType(dict(sorted(best.items())))
+
+
 def optimize_cross_asset(
     expected_returns: pd.Series,
     covariance: pd.DataFrame,
@@ -641,7 +771,17 @@ def optimize_cross_asset(
         weights = candidate
     else:
         iteration = max_iterations
-    quantities = _target_quantities(weights, portfolio_snapshot, ordered)
+    quantities = _refine_lot_quantities(
+        weights,
+        current,
+        mu,
+        cov,
+        linear,
+        risk_aversion,
+        portfolio_snapshot,
+        ordered,
+        constraints,
+    )
     report, bindings = _evaluate(quantities, portfolio_snapshot, ordered, constraints)
     if bindings:
         return CrossAssetOptimizationResult(

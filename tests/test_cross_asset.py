@@ -331,16 +331,14 @@ def test_current_constraint_breach_is_structured_and_never_relaxed() -> None:
     assert {binding.code for binding in result.failure.bindings} >= {"GROSS_LEVERAGE"}
 
 
-def test_adv_and_days_to_liquidate_infeasibility_is_structured() -> None:
+def test_adv_limit_keeps_coarse_lots_at_the_current_book() -> None:
     result = optimize(
         inputs=inputs(crypto_adv="100"), constraints=constraints(max_adv_participation=0.001)
     )
-    assert not result.feasible and result.report and result.failure
-    assert result.failure.code == "TARGET_PORTFOLIO_INFEASIBLE"
-    assert {binding.code for binding in result.failure.bindings} & {
-        "ADV_PARTICIPATION",
-        "DAYS_TO_LIQUIDATE",
-    }
+    assert result.feasible and result.target is not None and result.report is not None
+    assert result.target.quantities["CRYPTO:BTC-USDT-PERP"] == fp("-1", 0)
+    assert result.target.quantities["FUTURE:IF2609"] == fp("1", 0)
+    assert result.report.max_adv_participation <= 0.001 + 1e-12
 
 
 @pytest.mark.parametrize(

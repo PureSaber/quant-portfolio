@@ -411,8 +411,8 @@ def constant_correlation_covariance(
 ) -> pd.DataFrame:
     """Ledoit-Wolf shrinkage toward the constant-correlation target.
 
-    Variances stay on the diagonal. Every correlation is replaced by the
-    average sample correlation, and the intensity is the Honey (2004)
+    The target keeps sample variances and replaces off-diagonal correlations
+    with their sample average. The intensity is the Ledoit-Wolf (2004)
     estimator ``max(0, min(1, kappa / T))``.
     """
 
@@ -438,7 +438,11 @@ def constant_correlation_covariance(
     else:
         theta = ((centered**3).T @ centered) / observations - variance * sample
         np.fill_diagonal(theta, 0.0)
-        rho = float(np.diag(phi_matrix).sum() + average_correlation * np.sum(theta / unit))
+        variance_ratio = scale.T / scale
+        rho = float(
+            np.diag(phi_matrix).sum()
+            + average_correlation * np.sum(theta * variance_ratio)
+        )
         kappa = (float(phi_matrix.sum()) - rho) / gamma
         shrinkage = float(min(max(kappa / observations, 0.0), 1.0))
     shrunk = shrinkage * prior + (1.0 - shrinkage) * sample

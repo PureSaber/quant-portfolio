@@ -440,8 +440,7 @@ def constant_correlation_covariance(
         np.fill_diagonal(theta, 0.0)
         variance_ratio = scale.T / scale
         rho = float(
-            np.diag(phi_matrix).sum()
-            + average_correlation * np.sum(theta * variance_ratio)
+            np.diag(phi_matrix).sum() + average_correlation * np.sum(theta * variance_ratio)
         )
         kappa = (float(phi_matrix.sum()) - rho) / gamma
         shrinkage = float(min(max(kappa / observations, 0.0), 1.0))

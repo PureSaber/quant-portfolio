@@ -201,6 +201,14 @@ def optimize(**changes: object):
     )
 
 
+def test_linear_cost_prox_trades_less_when_costs_are_large() -> None:
+    cheap = optimize(inputs=tuple(replace(item, linear_cost_bps=0) for item in inputs()))
+    costly = optimize(inputs=tuple(replace(item, linear_cost_bps=2500) for item in inputs()))
+    assert cheap.feasible and cheap.report is not None
+    assert costly.feasible and costly.report is not None
+    assert costly.report.turnover < cheap.report.turnover
+
+
 def test_cross_asset_golden_a_share_futures_crypto_is_cash_aware() -> None:
     result = optimize()
     assert result.feasible and result.target and result.report and result.failure is None

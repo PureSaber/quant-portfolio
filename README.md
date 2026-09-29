@@ -67,23 +67,35 @@ quant-portfolio optimize \
   --out state/target_portfolio.json
 ```
 
-The optimizer uses a shrinkage/PSD-repaired covariance matrix and jointly enforces budget, asset
+The optimizer uses a shrinkage/PSD-repaired covariance and jointly enforces budget, asset
 bounds, turnover, group caps, and optional linear factor-exposure bounds while charging linear
-costs. `factor_exposures` is an asset-by-factor matrix and `factor_bounds` applies absolute target
-portfolio bounds as `lower <= X.T @ weights <= upper`; callers must convert relative-to-benchmark
-bounds before calling the optimizer. Infeasible intersections fail explicitly, and every returned
-portfolio is rechecked against all configured constraints. The Python API also exposes the
-square-root market-impact model.
+costs. Covariance estimation is `diagonal` (fixed shrinkage, default 0.2) or `ledoit_wolf`.
+`factor_model_covariance` builds `X F X' + diag(D)`. `benchmark_weights` switches the risk
+term to active variance `(w - w_b)' Σ (w - w_b)`, and `factor_bound_reference="active"`
+bounds `X'(w - w_b)` directly. Square-root impact enters that same objective when ADV,
+volatility, an impact coefficient and portfolio NAV are supplied; `square_root_impact_cost`
+remains available as a standalone estimate. Infeasible intersections fail explicitly, and
+every returned portfolio is rechecked against all configured constraints.
+
+`optimize_cvar` maximizes expected return minus historical CVaR. `optimize_multiperiod`
+plans a finite sequence of long-only rebalances and charges linear costs between dates.
 
 Research recipes can call `validate_research_allocation` and
-`research_allocation_weights` with one of three closed modes: `equal`, `inverse_vol`, or
-`cost_aware`. The cost-aware path delegates to the same mean-variance optimizer above. All modes
-return a long-only sleeve whose sum equals the explicit invested limit and whose names obey the
-same absolute position cap. `max_turnover` is measured from the real current portfolio and includes
-selling holdings omitted from the new score set; a budget too small for the required sleeve change
-fails explicitly. The `cost_aware` mode accepts the same factor inputs plus a validated
-`covariance_override`; its factor bounds retain absolute full-portfolio semantics when the sleeve
-invests less than 100%. Missing model inputs, non-finite values, incomplete covariance estimates,
+`research_allocation_weights` with `equal`, `inverse_vol`, `risk_parity`, `hrp`, `cvar`, or
+`cost_aware`. `inverse_vol` ignores correlation. `risk_parity` equalizes `w_i (Σw)_i`.
+`hrp` is hierarchical risk parity. `cvar` uses the scenarios in the lookback window.
+`cost_aware` delegates to the mean-variance optimizer. Its `expected_return_model` is
+`score` (the raw score is μ), `ic_vol` (Grinold `IC * volatility * z-score`), or
+`black_litterman` (those scaled scores are views around `risk_aversion * Σ w_market`).
+`covariance_estimator` on the covariance modes is `diagonal`, `ledoit_wolf`, or `factor`.
+All modes return a long-only sleeve whose sum equals the explicit invested limit and whose
+names obey the same absolute position cap. `max_turnover` is measured from the real current
+portfolio and includes selling holdings omitted from the new score set; a budget too small
+for the required sleeve change fails explicitly. The `cost_aware` mode accepts the same
+factor inputs plus a validated `covariance_override`. Factor bounds stay absolute unless
+`factor_bound_reference` is `active`. Benchmark-relative inputs and square-root impact
+require an invested limit of 1, because the sleeve solver is fully invested.
+Missing model inputs, non-finite values, incomplete covariance estimates,
 and solver non-convergence also fail closed.
 
 ## Cross-asset target API

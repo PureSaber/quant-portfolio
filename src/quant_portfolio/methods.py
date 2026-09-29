@@ -351,6 +351,166 @@ def square_root_impact_penalty(
     return float(np.sum(exact)), gradient
 
 
+def _complete_return_matrix(returns: pd.DataFrame) -> np.ndarray:
+    if not isinstance(returns, pd.DataFrame):
+        raise TypeError("returns must be a pandas DataFrame")
+    if returns.empty or returns.shape[1] == 0 or not returns.columns.is_unique:
+        raise ValueError("returns must contain at least one uniquely labeled asset")
+    if returns.shape[0] < 2:
+        raise ValueError("covariance estimators require at least two observations")
+    values = returns.to_numpy(dtype=float)
+    if not np.isfinite(values).all():
+        raise ValueError("covariance estimators require complete finite observations")
+    return values
+
+
+def _annualized(covariance: np.ndarray, annualization: float, index: pd.Index) -> pd.DataFrame:
+    if (
+        isinstance(annualization, bool)
+        or not isinstance(annualization, (int, float))
+        or not np.isfinite(annualization)
+        or annualization <= 0
+    ):
+        raise ValueError("annualization must be positive and finite")
+    repaired = repair_covariance(covariance * float(annualization))
+    return pd.DataFrame(repaired, index=index, columns=index)
+
+
+def ewma_covariance(
+    returns: pd.DataFrame,
+    *,
+    decay: float = 0.94,
+    annualization: float = 252.0,
+) -> pd.DataFrame:
+    """RiskMetrics EWMA covariance with normalized zero-mean outer products.
+
+    The latest observation has weight proportional to ``1 - decay``. Weights are
+    rescaled to sum to one. Returns are not demeaned.
+    """
+
+    if (
+        isinstance(decay, bool)
+        or not isinstance(decay, (int, float))
+        or not np.isfinite(decay)
+        or not 0 < float(decay) < 1
+    ):
+        raise ValueError("decay must be in (0, 1)")
+    values = _complete_return_matrix(returns)
+    observations = values.shape[0]
+    ages = np.arange(observations - 1, -1, -1, dtype=float)
+    weights = (1.0 - float(decay)) * float(decay) ** ages
+    weights /= weights.sum()
+    scaled = values * np.sqrt(weights)[:, None]
+    return _annualized(scaled.T @ scaled, annualization, returns.columns)
+
+
+def constant_correlation_covariance(
+    returns: pd.DataFrame,
+    *,
+    annualization: float = 252.0,
+) -> pd.DataFrame:
+    """Ledoit-Wolf shrinkage toward the constant-correlation target.
+
+    Variances stay on the diagonal. Every correlation is replaced by the
+    average sample correlation, and the intensity is the Honey (2004)
+    estimator ``max(0, min(1, kappa / T))``.
+    """
+
+    values = _complete_return_matrix(returns)
+    observations, assets = values.shape
+    centered = values - values.mean(axis=0, keepdims=True)
+    sample = centered.T @ centered / observations
+    if assets == 1:
+        return _annualized(sample, annualization, returns.columns)
+    variance = np.diag(sample).reshape(-1, 1)
+    if np.any(variance <= 0):
+        raise ValueError("constant correlation requires positive asset variance")
+    scale = np.sqrt(variance)
+    unit = scale @ scale.T
+    average_correlation = ((sample / unit).sum() - assets) / (assets * (assets - 1))
+    prior = average_correlation * unit
+    np.fill_diagonal(prior, variance.ravel())
+    squared = centered**2
+    phi_matrix = (squared.T @ squared) / observations - sample**2
+    gamma = float(np.sum((sample - prior) ** 2))
+    if gamma <= 0:
+        shrinkage = 0.0
+    else:
+        theta = ((centered**3).T @ centered) / observations - variance * sample
+        np.fill_diagonal(theta, 0.0)
+        rho = float(np.diag(phi_matrix).sum() + average_correlation * np.sum(theta / unit))
+        kappa = (float(phi_matrix.sum()) - rho) / gamma
+        shrinkage = float(min(max(kappa / observations, 0.0), 1.0))
+    shrunk = shrinkage * prior + (1.0 - shrinkage) * sample
+    return _annualized(shrunk, annualization, returns.columns)
+
+
+def oas_covariance(returns: pd.DataFrame, *, annualization: float = 252.0) -> pd.DataFrame:
+    """Oracle Approximating Shrinkage toward a scaled identity.
+
+    The intensity is the Chen, Wiesel, Eldar and Hero (2010) formula, clipped
+    to ``[0, 1]``. The sample second moment uses the ``1 / T`` divisor.
+    """
+
+    values = _complete_return_matrix(returns)
+    observations, assets = values.shape
+    centered = values - values.mean(axis=0, keepdims=True)
+    sample = centered.T @ centered / observations
+    if assets == 1:
+        return _annualized(sample, annualization, returns.columns)
+    trace = float(np.trace(sample))
+    trace_square = float(np.sum(sample * sample))
+    numerator = (1.0 - 2.0 / assets) * trace_square + trace**2
+    denominator = (observations + 1.0 - 2.0 / assets) * (trace_square - trace**2 / assets)
+    if denominator <= 0:
+        shrinkage = 1.0
+    else:
+        shrinkage = float(min(max(numerator / denominator, 0.0), 1.0))
+    target = trace / assets
+    shrunk = (1.0 - shrinkage) * sample
+    shrunk.flat[:: assets + 1] += shrinkage * target
+    return _annualized(shrunk, annualization, returns.columns)
+
+
+def random_matrix_covariance(
+    returns: pd.DataFrame,
+    *,
+    annualization: float = 252.0,
+) -> pd.DataFrame:
+    """Marchenko-Pastur denoising of the correlation matrix.
+
+    Eigenvalues at or below ``(1 + sqrt(N / T)) ** 2`` are replaced by their
+    average. The result is rescaled to a correlation matrix and then back to
+    the sample variances. Noise variance is fixed at 1, the correlation scale.
+    """
+
+    values = _complete_return_matrix(returns)
+    observations, assets = values.shape
+    centered = values - values.mean(axis=0, keepdims=True)
+    sample = centered.T @ centered / observations
+    if assets == 1:
+        return _annualized(sample, annualization, returns.columns)
+    std = np.sqrt(np.diag(sample))
+    if np.any(std <= 0):
+        raise ValueError("random matrix denoising requires positive asset variance")
+    correlation = sample / np.outer(std, std)
+    np.fill_diagonal(correlation, 1.0)
+    eigenvalues, eigenvectors = np.linalg.eigh(correlation)
+    upper = (1.0 + np.sqrt(assets / observations)) ** 2
+    noise = eigenvalues <= upper
+    if noise.any() and not noise.all():
+        cleaned = eigenvalues.copy()
+        cleaned[noise] = float(eigenvalues[noise].mean())
+        denoised = eigenvectors @ np.diag(cleaned) @ eigenvectors.T
+        rescale = np.sqrt(np.clip(np.diag(denoised), 1e-18, None))
+        denoised = denoised / np.outer(rescale, rescale)
+        np.fill_diagonal(denoised, 1.0)
+    else:
+        denoised = correlation
+    covariance = denoised * np.outer(std, std)
+    return _annualized(covariance, annualization, returns.columns)
+
+
 def _validated_covariance(covariance: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
     if not isinstance(covariance, pd.DataFrame):
         raise TypeError("covariance must be a pandas DataFrame")

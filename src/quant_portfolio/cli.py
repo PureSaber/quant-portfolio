@@ -60,6 +60,7 @@ def cmd_optimize(args: argparse.Namespace) -> int:
         shrinkage=args.shrinkage,
         annualization=args.annualization,
         method=args.covariance_method,
+        decay=args.ewma_decay,
     )
     current = _indexed_series(args.current_weights, "weight")
     costs = _indexed_series(args.linear_costs, "cost")
@@ -120,9 +121,17 @@ def build_parser() -> argparse.ArgumentParser:
     optimize.add_argument("--shrinkage", type=float, default=0.2)
     optimize.add_argument(
         "--covariance-method",
-        choices=("diagonal", "ledoit_wolf"),
+        choices=(
+            "diagonal",
+            "ledoit_wolf",
+            "ewma",
+            "constant_correlation",
+            "oas",
+            "random_matrix",
+        ),
         default="diagonal",
     )
+    optimize.add_argument("--ewma-decay", type=float, default=0.94)
     optimize.add_argument("--annualization", type=int, default=252)
     optimize.add_argument("--min-weight", type=float, default=0.0)
     optimize.add_argument("--max-weight", type=float, default=1.0)

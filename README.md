@@ -69,25 +69,35 @@ quant-portfolio optimize \
 
 The optimizer uses a shrinkage/PSD-repaired covariance and jointly enforces budget, asset
 bounds, turnover, group caps, and optional linear factor-exposure bounds while charging linear
-costs. Covariance estimation is `diagonal` (fixed shrinkage, default 0.2) or `ledoit_wolf`.
+costs. Covariance estimation is `diagonal` (fixed shrinkage, default 0.2), `ledoit_wolf`,
+`ewma`, `constant_correlation`, `oas`, or `random_matrix`.
 `factor_model_covariance` builds `X F X' + diag(D)`. `benchmark_weights` switches the risk
 term to active variance `(w - w_b)' Σ (w - w_b)`, and `factor_bound_reference="active"`
-bounds `X'(w - w_b)` directly. Square-root impact enters that same objective when ADV,
-volatility, an impact coefficient and portfolio NAV are supplied; `square_root_impact_cost`
-remains available as a standalone estimate. Infeasible intersections fail explicitly, and
-every returned portfolio is rechecked against all configured constraints.
+bounds `X'(w - w_b)` directly. `max_tracking_error` is a hard cap on that active volatility.
+Square-root impact enters that same objective when ADV, volatility, an impact coefficient and
+portfolio NAV are supplied; `square_root_impact_cost` remains available as a standalone
+estimate. `weight_steps` then chooses integer lots around the continuous solution and may
+leave residual cash. Infeasible intersections fail explicitly, and every returned portfolio
+is rechecked against all configured constraints.
 
-`optimize_cvar` maximizes expected return minus historical CVaR. `optimize_multiperiod`
-plans a finite sequence of long-only rebalances and charges linear costs between dates.
+`optimize_max_sharpe` and `optimize_max_diversification` are separate ratio objectives on the
+same long-only feasible set. `optimize_cvar` maximizes expected return minus historical CVaR.
+`optimize_evar` uses entropic value at risk and `optimize_cdar` uses conditional drawdown at
+risk. Those three path solvers accept `max_drawdown`, a cap on the drop in cumulative simple
+return. `optimize_multiperiod` plans a finite sequence of long-only rebalances and charges
+linear costs between dates. The cross-asset solver is separate: it projects leverage, margin,
+venue and participation limits, then searches quantity steps instead of only rounding toward
+zero after the fact.
 
 Research recipes can call `validate_research_allocation` and
-`research_allocation_weights` with `equal`, `inverse_vol`, `risk_parity`, `hrp`, `cvar`, or
-`cost_aware`. `inverse_vol` ignores correlation. `risk_parity` equalizes `w_i (Σw)_i`.
-`hrp` is hierarchical risk parity. `cvar` uses the scenarios in the lookback window.
-`cost_aware` delegates to the mean-variance optimizer. Its `expected_return_model` is
-`score` (the raw score is μ), `ic_vol` (Grinold `IC * volatility * z-score`), or
-`black_litterman` (those scaled scores are views around `risk_aversion * Σ w_market`).
-`covariance_estimator` on the covariance modes is `diagonal`, `ledoit_wolf`, or `factor`.
+`research_allocation_weights` with `equal`, `inverse_vol`, `risk_parity`, `hrp`, `cvar`,
+`evar`, `cdar`, `max_sharpe`, `max_diversification`, or `cost_aware`. `inverse_vol` ignores
+correlation. `risk_parity` equalizes `w_i (Σw)_i`. `hrp` is hierarchical risk parity.
+`cvar`, `evar` and `cdar` use the scenarios in the lookback window. `cost_aware` delegates
+to the mean-variance optimizer. Its `expected_return_model` is `score` (the raw score is μ),
+`ic_vol` (Grinold `IC * volatility * z-score`), or `black_litterman` (those scaled scores are
+views around `risk_aversion * Σ w_market`). `covariance_estimator` on the covariance modes is
+`diagonal`, `ledoit_wolf`, `factor`, `ewma`, `constant_correlation`, `oas`, or `random_matrix`.
 All modes return a long-only sleeve whose sum equals the explicit invested limit and whose
 names obey the same absolute position cap. `max_turnover` is measured from the real current
 portfolio and includes selling holdings omitted from the new score set; a budget too small
@@ -99,6 +109,11 @@ Missing model inputs, non-finite values, incomplete covariance estimates,
 and solver non-convergence also fail closed.
 
 ## Cross-asset target API
+
+`simulate_market` rebalances from a policy that sees only past returns, then charges linear
+and optional square-root costs and lets weights drift. `cpcv_splits`,
+`deflated_sharpe_ratio` and `probability_of_backtest_overfitting` are the purged-split,
+deflated-Sharpe and CSCV overfit diagnostics for those simulated returns.
 
 `quant_portfolio.optimize_cross_asset` consumes an immutable QExec `PortfolioRiskSnapshot`,
 QDK `InstrumentSpec`, and explicit point-in-time price, FX and ADV observations. It supports
@@ -141,6 +156,8 @@ never move, delete, or recreate existing tags or historical research artifacts.
 src/quant_portfolio/
 ├── allocator.py           # multi-book allocation and optional factor tilt
 ├── cross_asset.py          # causal cross-asset targets -> QExec OrderIntent suggestions
+├── objectives.py           # Sharpe, diversification, EVaR, CDaR and lot search
+├── evaluation.py           # causal simulator, CPCV, deflated Sharpe and PBO
 ├── cli.py                 # command-line interface
 └── synthetic_spread.py    # synthetic generator + causal, cost-aware demo
 configs/

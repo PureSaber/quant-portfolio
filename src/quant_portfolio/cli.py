@@ -56,7 +56,10 @@ def cmd_optimize(args: argparse.Namespace) -> int:
         history = history.drop(columns="date")
     history = history.reindex(columns=expected.index)
     covariance = estimate_covariance(
-        history, shrinkage=args.shrinkage, annualization=args.annualization
+        history,
+        shrinkage=args.shrinkage,
+        annualization=args.annualization,
+        method=args.covariance_method,
     )
     current = _indexed_series(args.current_weights, "weight")
     costs = _indexed_series(args.linear_costs, "cost")
@@ -115,6 +118,11 @@ def build_parser() -> argparse.ArgumentParser:
     optimize.add_argument("--risk-aversion", type=float, default=5.0)
     optimize.add_argument("--turnover-penalty", type=float, default=0.0)
     optimize.add_argument("--shrinkage", type=float, default=0.2)
+    optimize.add_argument(
+        "--covariance-method",
+        choices=("diagonal", "ledoit_wolf"),
+        default="diagonal",
+    )
     optimize.add_argument("--annualization", type=int, default=252)
     optimize.add_argument("--min-weight", type=float, default=0.0)
     optimize.add_argument("--max-weight", type=float, default=1.0)

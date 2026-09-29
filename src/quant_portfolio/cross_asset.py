@@ -630,9 +630,11 @@ def optimize_cross_asset(
     weights = current.copy()
     linear = np.array([item.linear_cost_bps / 10_000 for item in ordered], dtype=float)
     for iteration in range(1, max_iterations + 1):
-        trade = weights - current
-        gradient = mu - risk_aversion * (cov @ weights) - linear * np.sign(trade)
-        candidate = _project_weights(weights + step * gradient, current, ordered, constraints)
+        gradient = mu - risk_aversion * (cov @ weights)
+        proposal = weights + step * gradient
+        trade = proposal - current
+        shrunk = current + np.sign(trade) * np.maximum(np.abs(trade) - step * linear, 0.0)
+        candidate = _project_weights(shrunk, current, ordered, constraints)
         if float(np.max(np.abs(candidate - weights))) <= tolerance:
             weights = candidate
             break

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -30,6 +31,22 @@ def load_config(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
+def _observation_time(value) -> pd.Timestamp:
+    """Daily labels are end-of-day UTC; explicit timestamps retain their instant."""
+    if not isinstance(value, (str, pd.Timestamp)) or pd.isna(value):
+        raise ValueError("observation date/time must be explicit and valid")
+    try:
+        stamp = pd.Timestamp(value)
+        if pd.isna(stamp):
+            raise ValueError("missing date/time")
+        stamp = stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp.tz_convert("UTC")
+        if isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            stamp += pd.Timedelta(days=1) - pd.Timedelta(nanoseconds=1)
+        return stamp
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise ValueError(f"invalid observation date/time: {value!r}") from exc
+
+
 def _read_nav(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path)
     if df.empty:
@@ -39,8 +56,10 @@ def _read_nav(path: Path) -> pd.DataFrame:
     if not value_cols:
         raise ValueError(f"no nav column in {path}")
     out = df[[date_col, value_cols[0]]].rename(columns={date_col: "date", value_cols[0]: "nav"})
-    out["date"] = out["date"].astype(str)
-    return out
+    out["_time"] = out["date"].map(_observation_time)
+    if out["_time"].duplicated().any():
+        raise ValueError("duplicate NAV observation date/time")
+    return out.sort_values("_time")
 
 
 def _read_holdings(path: Path) -> pd.DataFrame:
@@ -50,17 +69,25 @@ def _read_holdings(path: Path) -> pd.DataFrame:
     return df[["symbol", "weight"]].copy()
 
 
-def _read_factor_scores(path: Path, column: str) -> pd.Series:
+def _read_factor_scores(path: Path, column: str, *, as_of: str, undated_as_of=None) -> pd.Series:
     df = read_symbol_frame(path)
     if column not in df.columns:
         raise ValueError(f"factor column {column} missing in {path}")
     if "symbol" not in df.columns:
         raise ValueError(f"factor scores need symbol column: {path}")
-    latest = (
-        df.sort_values("date").groupby("symbol", as_index=False).tail(1)
-        if "date" in df.columns
-        else df
+    cutoff = _observation_time(as_of)
+    if "date" not in df:
+        if undated_as_of is None:
+            raise ValueError("undated factor scores require factor_scores.as_of")
+        df["date"] = undated_as_of
+    df["_time"] = df["date"].map(_observation_time)
+    df["_available"] = (
+        df["available_at"].map(_observation_time) if "available_at" in df else df["_time"]
     )
+    if df.duplicated(["symbol", "_time", "_available"]).any():
+        raise ValueError("duplicate factor observation date/time and availability")
+    eligible = df[(df["_time"] <= cutoff) & (df["_available"] <= cutoff)]
+    latest = eligible.sort_values(["_time", "_available"]).groupby("symbol", as_index=False).tail(1)
     scores = latest.set_index("symbol")[column].astype(float)
     if not scores.index.is_unique or not np.isfinite(scores).all():
         raise ValueError("factor scores must be finite with one latest score per symbol")
@@ -135,13 +162,15 @@ def allocate(config: dict) -> PortfolioSnapshot:
                 combined[sym] = combined.get(sym, 0.0) + float(row["weight"]) * scaled_weight
 
     total_nav = sum(r["nav"] * r["budget_weight"] for r in nav_rows)
-    as_of = max(r["as_of"] for r in nav_rows)
+    as_of = max((r["as_of"] for r in nav_rows), key=_observation_time)
 
     factor_cfg = config.get("factor_scores") or {}
     if factor_cfg.get("path"):
         scores = _read_factor_scores(
             Path(factor_cfg["path"]),
             str(factor_cfg.get("column", "momentum_20d")),
+            as_of=as_of,
+            undated_as_of=factor_cfg.get("as_of"),
         )
         combined = _blend_factor_scores(
             combined,

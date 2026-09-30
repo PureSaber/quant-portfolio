@@ -3,8 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import yaml
+
+from quant_portfolio._inputs import read_symbol_frame
 
 
 @dataclass
@@ -41,17 +44,14 @@ def _read_nav(path: Path) -> pd.DataFrame:
 
 
 def _read_holdings(path: Path) -> pd.DataFrame:
-    df = pd.read_csv(path)
+    df = read_symbol_frame(path)
     if "symbol" not in df.columns or "weight" not in df.columns:
         raise ValueError(f"holdings need symbol,weight columns: {path}")
     return df[["symbol", "weight"]].copy()
 
 
 def _read_factor_scores(path: Path, column: str) -> pd.Series:
-    if path.suffix == ".parquet":
-        df = pd.read_parquet(path)
-    else:
-        df = pd.read_csv(path)
+    df = read_symbol_frame(path)
     if column not in df.columns:
         raise ValueError(f"factor column {column} missing in {path}")
     if "symbol" not in df.columns:
@@ -62,6 +62,8 @@ def _read_factor_scores(path: Path, column: str) -> pd.Series:
         else df
     )
     scores = latest.set_index("symbol")[column].astype(float)
+    if not scores.index.is_unique or not np.isfinite(scores).all():
+        raise ValueError("factor scores must be finite with one latest score per symbol")
     return scores
 
 
@@ -70,19 +72,27 @@ def _blend_factor_scores(
     factor_scores: pd.Series,
     weight: float,
 ) -> dict[str, float]:
-    if factor_scores.empty:
+    """Tilt scored holdings within their budget; unscored holdings stay unchanged."""
+    if not np.isfinite(weight):
+        raise ValueError("factor weight must be finite")
+    if factor_scores.empty or weight == 0:
         return combined
-    aligned = {sym: combined.get(sym, 0.0) for sym in factor_scores.index}
+    aligned = {sym: value for sym, value in combined.items() if sym in factor_scores.index}
     if not aligned:
         return combined
-    score = factor_scores.reindex(list(aligned.keys())).fillna(0.0)
+    budget = sum(aligned.values())
+    if budget == 0:
+        return combined
+    score = factor_scores.reindex(list(aligned.keys()))
     score_norm = (score - score.mean()) / (score.std(ddof=0) or 1.0)
     blended: dict[str, float] = {}
     for sym, base_w in aligned.items():
         tilt = 1.0 + weight * float(score_norm.get(sym, 0.0))
         blended[sym] = max(base_w * tilt, 0.0)
-    total = sum(blended.values()) or 1.0
-    return {k: round(v / total, 6) for k, v in blended.items()}
+    total = sum(blended.values())
+    if not np.isfinite(total) or total <= 0:
+        raise ValueError("factor tilt removed every funded holding in the scored sleeve")
+    return {**combined, **{symbol: value / total * budget for symbol, value in blended.items()}}
 
 
 def allocate(config: dict) -> PortfolioSnapshot:

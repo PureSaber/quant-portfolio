@@ -52,6 +52,12 @@ quant-portfolio status \
 ```
 
 The allocator combines versioned strategy-book NAV and holdings fixtures, then optionally applies a normalized synthetic factor tilt.
+The tilt preserves the invested budget after `position_scale`; zero factor weight leaves
+holdings unchanged. Symbols without a score keep their original weights, and scores for
+symbols outside the holdings are ignored. Redistribution stays within the scored sleeve's
+existing budget. A tilt that removes every funded position fails explicitly.
+Security identifiers are strings: CSV input preserves leading zeros and identifiers such as
+`NA`; Parquet symbol columns must already contain strings. Blank identifiers are rejected.
 
 ## Cost-aware optimizer
 
@@ -85,7 +91,11 @@ same long-only feasible set. `optimize_cvar` maximizes expected return minus his
 `optimize_evar` uses entropic value at risk and `optimize_cdar` uses conditional drawdown at
 risk. Those three path solvers accept `max_drawdown`, a cap on the drop in cumulative simple
 return. `optimize_multiperiod` plans a finite sequence of long-only rebalances and charges
-linear costs between dates. The cross-asset solver is separate: it projects leverage, margin,
+linear costs between dates. Each date jointly enforces asset bounds, group caps and turnover,
+and every returned row is checked again. The first trade and its cost are measured from the
+real `current_weights`, including any required correction of an initially out-of-bounds
+holding. An insufficient turnover budget fails explicitly. The cross-asset solver is separate:
+it projects leverage, margin,
 venue and participation limits, then searches quantity steps instead of only rounding toward
 zero after the fact.
 
@@ -111,7 +121,10 @@ and solver non-convergence also fail closed.
 ## Cross-asset target API
 
 `simulate_market` rebalances from a policy that sees only past returns, then charges linear
-and optional square-root costs and lets weights drift. `cpcv_splits`,
+and optional square-root costs and lets weights drift. Its decision index must be unique,
+strictly increasing and contain no missing values: use a `DatetimeIndex`, `PeriodIndex`, or
+finite numeric step index. Convert date strings explicitly before calling; unordered input
+is rejected before any policy call. `cpcv_splits`,
 `deflated_sharpe_ratio` and `probability_of_backtest_overfitting` are the purged-split,
 deflated-Sharpe and CSCV overfit diagnostics for those simulated returns.
 

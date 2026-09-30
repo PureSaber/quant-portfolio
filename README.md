@@ -187,6 +187,14 @@ tests/
 
 ## Important limitations
 
+Portfolio `status` selects factor observations at or before its reported `as_of`.
+NAV rows are ordered by parsed timestamps. Date-only labels mean the end of that UTC day;
+explicit timestamps are compared in UTC (naive timestamps are treated as UTC).
+Factors may supply `available_at` to exclude late publications and revisions. Without that
+column, `date` is assumed to be the availability date. Undated files must declare
+`factor_scores.as_of` in the config. Ambiguous duplicate observations and invalid dates fail
+validation; holdings without eligible scores retain their original allocation.
+
 - The synthetic process is intentionally simple and is not calibrated to a real market.
 - A positive synthetic backtest does not imply investability or future returns.
 - Execution, liquidity, capacity, financing, taxes, and market-impact models are incomplete.

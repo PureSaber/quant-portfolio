@@ -287,6 +287,9 @@ def propose(card, cfg, quantities, available, prices, cash, nav, *, now=None):
         if symbol not in managed and quantity * prices[symbol] > nav * max_weight:
             reasons.append("unmanaged_concentration_limit:" + symbol)
     buy_cash = Decimal(0)
+    projected_quantities = dict(quantities)
+    projected_nav = nav
+    projected_cash = cash
     for symbol in sorted(managed):
         if symbol not in prices:
             raise ValueError("Missing current price for managed instrument")
@@ -294,25 +297,45 @@ def propose(card, cfg, quantities, available, prices, cash, nav, *, now=None):
         weight = target_weights.get(symbol, Decimal(0))
         if weight > max_weight:
             reasons.append("target_concentration_limit:" + symbol)
-        target = (
-            int((nav * weight - minimum) / (price * (1 + slip) * (1 + commission)) // 100) * 100
-            if weight
-            else 0
-        )
-        target = max(0, target)
-        delta = Decimal(target) - quantities.get(symbol, 0)
+        current = quantities.get(symbol, Decimal(0))
+        value_gap = nav * weight - current * price
+        if not value_gap:
+            continue
+        buying = value_gap > 0
+        side = "buy" if buying else "sell"
+        execution_price = (
+            price * (1 + (slip if buying else -slip)) / Decimal("0.01")
+        ).to_integral_value(rounding=ROUND_CEILING if buying else ROUND_FLOOR) * Decimal("0.01")
+        if execution_price <= 0:
+            raise ValueError("Estimated execution price must be positive")
+        if buying:
+            # Reserve costs only for the incremental purchase, never for existing holdings.
+            low, high = 0, int(value_gap / (100 * execution_price))
+            while low < high:
+                lots = (low + high + 1) // 2
+                amount = lots * 100 * execution_price
+                if amount + max(minimum, amount * commission) <= value_gap:
+                    low = lots
+                else:
+                    high = lots - 1
+            delta = Decimal(low * 100)
+        else:
+            lots = (-value_gap / price / 100).to_integral_value(rounding=ROUND_CEILING)
+            delta = -lots * 100
+            if -delta > current:
+                reasons.append("odd_lot_liquidation_requires_manual_review:" + symbol)
+                continue
+            if -delta > available.get(symbol, 0):
+                reasons.append("insufficient_available_shares:" + symbol)
         if not delta:
             continue
-        if delta < 0 and -delta > available.get(symbol, 0):
-            reasons.append("insufficient_available_shares:" + symbol)
-        side = "buy" if delta > 0 else "sell"
-        execution_price = (
-            price * (1 + (slip if delta > 0 else -slip)) / Decimal("0.01")
-        ).to_integral_value(rounding=ROUND_CEILING if delta > 0 else ROUND_FLOOR) * Decimal("0.01")
         notional = abs(delta) * execution_price
         cost = max(minimum, notional * commission) + (notional * tax if delta < 0 else 0)
         if delta > 0:
             buy_cash += notional + cost
+        projected_quantities[symbol] = current + delta
+        projected_nav -= delta * (execution_price - price) + cost
+        projected_cash -= delta * execution_price + cost
         trades.append(
             {
                 "symbol": symbol,
@@ -325,6 +348,14 @@ def propose(card, cfg, quantities, available, prices, cash, nav, *, now=None):
     # Do not spend proceeds from sells that have not actually been confirmed.
     if buy_cash > max(Decimal(0), cash - nav * reserve):
         reasons.append("insufficient_settled_cash_reconcile_sells_first")
+    if projected_nav <= 0:
+        reasons.append("nonpositive_projected_nav")
+    else:
+        for symbol, quantity in projected_quantities.items():
+            if quantity * prices[symbol] > projected_nav * max_weight:
+                reasons.append("projected_concentration_limit:" + symbol)
+        if trades and projected_cash < projected_nav * reserve:
+            reasons.append("projected_cash_buffer_limit")
     return ([] if reasons else trades), reasons
 
 

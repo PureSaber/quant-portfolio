@@ -33,7 +33,11 @@ def _status(tmp_path, symbols, *, scale=0.5, factor_symbols=None, tilt=0.0, parq
     if factor_symbols is not None:
         path = tmp_path / ("factors.parquet" if parquet else "factors.csv")
         scores = pd.DataFrame(
-            {"symbol": factor_symbols, "momentum_20d": range(len(factor_symbols))}
+            {
+                "date": "2026-09-29",
+                "symbol": factor_symbols,
+                "momentum_20d": range(len(factor_symbols)),
+            }
         )
         if parquet:
             scores.to_parquet(path, index=False)

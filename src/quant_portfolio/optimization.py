@@ -223,7 +223,7 @@ def validate_research_allocation(value: Mapping[str, object]) -> dict[str, objec
         raise ValueError("allocation.factor_bound_reference must be absolute or active")
     if mode != "cost_aware" and factor_bound_reference != "absolute":
         raise ValueError("allocation.factor_bound_reference is only supported for cost_aware")
-    return {
+    normalized = {
         "mode": mode,
         "lookback": lookback,
         "min_observations": min_observations,
@@ -233,16 +233,23 @@ def validate_research_allocation(value: Mapping[str, object]) -> dict[str, objec
         "turnover_penalty": turnover_penalty,
         "max_turnover": max_turnover,
         "expected_return_model": expected_return_model,
-        "information_coefficient": information_coefficient,
-        "black_litterman_tau": tau,
-        "cvar_beta": cvar_beta,
-        "evar_beta": evar_beta,
-        "cdar_beta": cdar_beta,
-        "ewma_decay": decay,
-        "risk_free_rate": risk_free_rate,
-        "max_tracking_error": max_tracking_error,
         "factor_bound_reference": factor_bound_reference,
     }
+    # Persist only applicable optional fields. The execution adapter validates this
+    # normalized fragment again after serializing its plan.
+    if estimator == "ewma":
+        normalized["ewma_decay"] = decay
+    if mode == "cost_aware":
+        normalized.update(
+            information_coefficient=information_coefficient,
+            black_litterman_tau=tau,
+            max_tracking_error=max_tracking_error,
+        )
+    if mode == "max_sharpe":
+        normalized["risk_free_rate"] = risk_free_rate
+    if mode in _PATH_MODES:
+        normalized[f"{mode}_beta"] = {"cvar": cvar_beta, "evar": evar_beta, "cdar": cdar_beta}[mode]
+    return normalized
 
 
 def _research_covariance(
@@ -275,7 +282,7 @@ def _research_covariance(
             window,
             shrinkage=float(settings["covariance_shrinkage"]),
             method=method,
-            decay=float(settings["ewma_decay"]),
+            decay=float(settings.get("ewma_decay", 0.94)),
         )
     aligned = covariance.reindex(index=assets, columns=assets)
     if aligned.isna().any().any():

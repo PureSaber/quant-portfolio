@@ -1918,7 +1918,7 @@ def optimize_multiperiod(
         raise ValueError("expected_returns must be a non-empty DataFrame of dates by assets")
     if not expected_returns.columns.is_unique:
         raise ValueError("expected return assets must be unique")
-    assets = [str(asset) for asset in expected_returns.columns]
+    assets = list(expected_returns.columns)
     mu_path = expected_returns.apply(pd.to_numeric, errors="coerce")
     if mu_path.isna().any().any() or not np.isfinite(mu_path.to_numpy()).all():
         raise ValueError("expected_returns must be finite")
@@ -1937,6 +1937,19 @@ def optimize_multiperiod(
         or risk_aversion <= 0
     ):
         raise ValueError("risk_aversion must be positive and finite")
+    if (
+        isinstance(max_iterations, bool)
+        or not isinstance(max_iterations, int)
+        or max_iterations <= 0
+    ):
+        raise ValueError("max_iterations must be a positive integer")
+    if (
+        isinstance(tolerance, bool)
+        or not isinstance(tolerance, (int, float))
+        or not np.isfinite(tolerance)
+        or tolerance <= 0
+    ):
+        raise ValueError("tolerance must be positive and finite")
     settings = _validated_constraints(constraints, assets)
     if settings.max_tracking_error is not None:
         raise ValueError(
@@ -1949,43 +1962,60 @@ def optimize_multiperiod(
         if not isinstance(current_weights, pd.Series) or not current_weights.index.is_unique:
             raise ValueError("current_weights must be a Series with unique assets")
         numeric_current = pd.to_numeric(current_weights.reindex(assets), errors="coerce")
-        if numeric_current.isna().any() or (numeric_current < 0).any():
-            raise ValueError("current_weights must cover every asset with a non-negative weight")
+        if (
+            set(current_weights.index) != set(assets)
+            or not np.isfinite(numeric_current.to_numpy(dtype=float)).all()
+            or (numeric_current < 0).any()
+            or numeric_current.sum() > 1.0 + 1e-10
+        ):
+            raise ValueError(
+                "current_weights must cover exactly the planned assets with finite, "
+                "non-negative weights summing to at most one"
+            )
         current = numeric_current.to_numpy(dtype=float)
     if linear_costs is None:
         costs = np.zeros(len(assets))
     else:
-        if not isinstance(linear_costs, pd.Series):
-            raise ValueError("linear_costs must be a Series")
+        if not isinstance(linear_costs, pd.Series) or not linear_costs.index.is_unique:
+            raise ValueError("linear_costs must be a Series with unique assets")
         numeric_costs = pd.to_numeric(linear_costs.reindex(assets), errors="coerce")
-        if numeric_costs.isna().any() or (numeric_costs < 0).any():
+        if not np.isfinite(numeric_costs.to_numpy(dtype=float)).all() or (numeric_costs < 0).any():
             raise ValueError("linear_costs must be finite and non-negative for every asset")
         costs = numeric_costs.to_numpy(dtype=float)
     eigenvalues = np.linalg.eigvalsh(cov)
     step = 0.5 / (float(risk_aversion) * max(float(eigenvalues.max()), 1e-12) + 1.0)
-    anchor = _project_box_simplex(current, settings.min_weight, settings.max_weight, total=1.0)
+    projection_tolerance = max(min(float(tolerance), 1e-10), 1e-12)
+    anchor = _project_joint_feasible_set(
+        current,
+        assets,
+        current,
+        0.0,
+        settings,
+        None,
+        {},
+        tolerance=projection_tolerance,
+    )
     plan = np.tile(anchor, (len(mu_path), 1))
     mu = mu_path.to_numpy(dtype=float)
     converged = False
     iteration = max_iterations
     for iteration in range(1, max_iterations + 1):
         updated = np.empty_like(plan)
-        previous = anchor
+        previous = current
         for period in range(len(mu)):
             gradient = mu[period] - float(risk_aversion) * (cov @ plan[period])
             proposal = plan[period] + step * gradient
-            trade = proposal - previous
-            proposal = previous + np.sign(trade) * np.maximum(np.abs(trade) - step * costs, 0.0)
-            proposal = _project_box_simplex(
-                proposal, settings.min_weight, settings.max_weight, total=1.0
-            )
-            proposal = _constrain_turnover(
+            proposal = _project_joint_feasible_set(
                 proposal,
+                assets,
                 previous,
-                lower=settings.min_weight,
-                upper=settings.max_weight,
-                total=1.0,
-                max_turnover=settings.max_turnover,
+                0.0,
+                settings,
+                None,
+                {},
+                tolerance=projection_tolerance,
+                trade_penalties=costs,
+                penalty_scale=step,
             )
             updated[period] = proposal
             previous = proposal
@@ -1999,8 +2029,22 @@ def optimize_multiperiod(
             f"multi-period optimization did not converge after {max_iterations} iterations"
         )
     objective = 0.0
-    previous = anchor
+    previous = current
     for period in range(len(mu)):
+        violations = _constraint_violations(
+            plan[period],
+            assets,
+            previous,
+            0.0,
+            settings,
+            None,
+            {},
+            tolerance=max(projection_tolerance * 10, 1e-9),
+        )
+        if not np.isfinite(plan[period]).all() or violations:
+            raise RuntimeError(
+                f"multi-period plan violates constraints at period {period}: {violations}"
+            )
         trade = plan[period] - previous
         objective += float(mu[period] @ plan[period])
         objective -= 0.5 * float(risk_aversion) * float(plan[period] @ cov @ plan[period])

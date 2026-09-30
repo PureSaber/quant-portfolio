@@ -64,6 +64,49 @@ def test_cpcv_purges_and_embargoes_around_each_test_block() -> None:
         cpcv_splits(8, 2, 1, purge=8, embargo=8)
 
 
+@pytest.mark.parametrize(
+    "index",
+    [
+        pd.to_datetime(["2026-09-29", "2026-09-28", "2026-09-27"]),
+        pd.to_datetime(["2026-09-27", "2026-09-29", "2026-09-28"]),
+        pd.to_datetime(["2026-09-27", "2026-09-27", "2026-09-28"]),
+        pd.to_datetime(["2026-09-27", None, "2026-09-29"]),
+        pd.Index([2, 1, 0]),
+        pd.Index([0.0, float("inf"), 2.0]),
+        pd.Index(["not-a-date", "still-not-a-date", "zzz"]),
+    ],
+)
+def test_simulator_rejects_invalid_clock_before_calling_policy(index):
+    def policy(_history):
+        pytest.fail("invalid decision times reached the policy")
+
+    with pytest.raises(ValueError, match="index"):
+        simulate_market(pd.DataFrame({"A": [0.01, 0.02, 0.03]}, index=index), policy)
+
+
+@pytest.mark.parametrize(
+    "index",
+    [
+        pd.date_range("2026-09-27", periods=3),
+        pd.date_range("2026-09-27", periods=3, tz="Asia/Shanghai"),
+        pd.period_range("2026-09-27", periods=3, freq="D"),
+        pd.RangeIndex(3),
+    ],
+)
+def test_every_policy_call_sees_only_earlier_decision_times(index):
+    calls = []
+
+    def policy(history):
+        decision_time = index[len(history)]
+        assert all(time < decision_time for time in history.index)
+        calls.append(decision_time)
+        return pd.Series({"A": 1.0})
+
+    result = simulate_market(pd.DataFrame({"A": [0.01, 0.02, 0.03]}, index=index), policy)
+    assert calls == list(index)
+    assert result.wealth.index.equals(index)
+
+
 def test_deflated_sharpe_falls_as_the_trial_count_grows() -> None:
     rng = np.random.default_rng(5)
     noise = rng.normal(scale=0.02, size=60)

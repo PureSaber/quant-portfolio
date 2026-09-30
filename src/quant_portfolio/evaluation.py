@@ -263,6 +263,19 @@ def _return_frame(asset_returns: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("asset_returns must contain at least one uniquely named asset")
     if not asset_returns.index.is_unique:
         raise ValueError("asset_returns index must be unique")
+    index = asset_returns.index
+    if not isinstance(index, (pd.DatetimeIndex, pd.PeriodIndex)) and not (
+        pd.api.types.is_numeric_dtype(index.dtype) and not pd.api.types.is_bool_dtype(index.dtype)
+    ):
+        raise ValueError(
+            "asset_returns index must contain datetime, period or numeric decision times"
+        )
+    if index.hasnans or (
+        pd.api.types.is_numeric_dtype(index.dtype) and not np.isfinite(index.to_numpy()).all()
+    ):
+        raise ValueError("asset_returns index must contain finite, non-missing decision times")
+    if not index.is_monotonic_increasing:
+        raise ValueError("asset_returns index must be strictly increasing")
     values = asset_returns.apply(pd.to_numeric, errors="coerce")
     if values.isna().any().any() or not np.isfinite(values.to_numpy(dtype=float)).all():
         raise ValueError("asset_returns must be finite")

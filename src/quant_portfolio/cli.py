@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from quant_portfolio._inputs import read_symbol_frame
 from quant_portfolio.allocator import allocate, load_config
 from quant_portfolio.optimization import (
     OptimizationConstraints,
@@ -39,11 +40,13 @@ def cmd_status(args: argparse.Namespace) -> int:
 def _indexed_series(path: str, value_column: str) -> pd.Series | None:
     if not path:
         return None
-    frame = pd.read_csv(path)
+    frame = read_symbol_frame(Path(path))
     required = {"symbol", value_column}
     missing = sorted(required - set(frame.columns))
     if missing:
         raise ValueError(f"{path}缺少字段: {missing}")
+    if not frame["symbol"].is_unique:
+        raise ValueError(f"{path}: symbol must be unique")
     return frame.set_index("symbol")[value_column].astype(float)
 
 
@@ -54,6 +57,9 @@ def cmd_optimize(args: argparse.Namespace) -> int:
     history = pd.read_csv(args.returns)
     if "date" in history:
         history = history.drop(columns="date")
+    missing_assets = sorted(set(expected.index) - set(history.columns))
+    if missing_assets:
+        raise ValueError(f"return history is missing assets: {missing_assets}")
     history = history.reindex(columns=expected.index)
     covariance = estimate_covariance(
         history,

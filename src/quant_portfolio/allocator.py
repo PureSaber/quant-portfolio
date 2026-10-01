@@ -31,6 +31,18 @@ def load_config(path: Path) -> dict:
     return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
 
 
+def _finite_number(value, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError(f"{name} must be a finite number, not a boolean")
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} must be a finite number") from exc
+    if not np.isfinite(number):
+        raise ValueError(f"{name} must be a finite number")
+    return number
+
+
 def _observation_time(value) -> pd.Timestamp:
     """Daily labels are end-of-day UTC; explicit timestamps retain their instant."""
     if not isinstance(value, (str, pd.Timestamp)) or pd.isna(value):
@@ -56,6 +68,9 @@ def _read_nav(path: Path) -> pd.DataFrame:
     if not value_cols:
         raise ValueError(f"no nav column in {path}")
     out = df[[date_col, value_cols[0]]].rename(columns={date_col: "date", value_cols[0]: "nav"})
+    out["nav"] = out["nav"].map(lambda value: _finite_number(value, "nav"))
+    if out["nav"].lt(0).any():
+        raise ValueError("nav must be nonnegative")
     out["_time"] = out["date"].map(_observation_time)
     if out["_time"].duplicated().any():
         raise ValueError("duplicate NAV observation date/time")
@@ -66,6 +81,7 @@ def _read_holdings(path: Path) -> pd.DataFrame:
     df = read_symbol_frame(path)
     if "symbol" not in df.columns or "weight" not in df.columns:
         raise ValueError(f"holdings need symbol,weight columns: {path}")
+    df["weight"] = df["weight"].map(lambda value: _finite_number(value, "holdings.weight"))
     return df[["symbol", "weight"]].copy()
 
 
@@ -126,12 +142,18 @@ def allocate(config: dict) -> PortfolioSnapshot:
     strategies_cfg = config.get("strategies") or []
     books: list[StrategyBook] = []
     for entry in strategies_cfg:
+        weight = _finite_number(entry.get("weight", 1.0), "weight")
+        scale = _finite_number(entry.get("position_scale", 1.0), "position_scale")
+        if weight < 0:
+            raise ValueError("weight must be nonnegative")
+        if not 0 <= scale <= 1:
+            raise ValueError("position_scale must be in [0, 1]")
         books.append(
             StrategyBook(
                 name=str(entry["name"]),
                 nav_path=Path(entry["nav"]),
-                weight=float(entry.get("weight", 1.0)),
-                position_scale=float(entry.get("position_scale", 1.0)),
+                weight=weight,
+                position_scale=scale,
             )
         )
 
@@ -139,19 +161,27 @@ def allocate(config: dict) -> PortfolioSnapshot:
         raise ValueError("no strategies configured")
 
     total_weight = sum(b.weight for b in books)
+    if not np.isfinite(total_weight) or total_weight <= 0:
+        raise ValueError("total strategy weight must be finite and positive")
     nav_rows: list[dict] = []
     combined: dict[str, float] = {}
+    total_nav = 0.0
 
     for book in books:
         nav_df = _read_nav(book.nav_path)
         latest = nav_df.iloc[-1]
-        scaled_weight = book.weight / total_weight * book.position_scale
+        capital_weight = book.weight / total_weight
+        scaled_weight = capital_weight * book.position_scale
+        # Exposure scaling leaves capital in cash; it does not destroy account NAV.
+        total_nav += float(latest["nav"]) * capital_weight
         nav_rows.append(
             {
                 "name": book.name,
                 "as_of": str(latest["date"]),
                 "nav": float(latest["nav"]),
+                "capital_weight": round(capital_weight, 6),
                 "budget_weight": round(scaled_weight, 6),
+                "cash_weight": round(capital_weight - scaled_weight, 6),
             }
         )
         holdings_path = Path(str(book.nav_path).replace("nav.csv", "holdings.csv"))
@@ -161,7 +191,6 @@ def allocate(config: dict) -> PortfolioSnapshot:
                 sym = str(row["symbol"])
                 combined[sym] = combined.get(sym, 0.0) + float(row["weight"]) * scaled_weight
 
-    total_nav = sum(r["nav"] * r["budget_weight"] for r in nav_rows)
     as_of = max((r["as_of"] for r in nav_rows), key=_observation_time)
 
     factor_cfg = config.get("factor_scores") or {}
@@ -178,6 +207,9 @@ def allocate(config: dict) -> PortfolioSnapshot:
             float(factor_cfg.get("weight", 0.25)),
         )
 
+    _finite_number(total_nav, "total_nav")
+    for symbol, value in combined.items():
+        _finite_number(value, f"combined_weights.{symbol}")
     return PortfolioSnapshot(
         as_of=as_of,
         total_nav=round(total_nav, 4),

@@ -52,6 +52,15 @@ quant-portfolio status \
 ```
 
 The allocator combines versioned strategy-book NAV and holdings fixtures, then optionally applies a normalized synthetic factor tilt.
+`total_nav` uses the normalized strategy capital budgets at full calculation precision,
+independently of `position_scale`. Each book reports `capital_weight`, the invested
+`budget_weight`, and the reserve `cash_weight` released by scaling; the reserve is retained
+in NAV and is not inserted as a security into `combined_weights`.
+Strategy weights must be finite and nonnegative with a positive finite total;
+`position_scale` must be finite and within [0, 1]. Boolean values are not numeric
+configuration values. NAV observations must be finite and nonnegative, and holdings
+weights must be finite. Invalid inputs fail before a status file is written; status JSON
+rejects NaN and infinity.
 The tilt preserves the invested budget after `position_scale`; zero factor weight leaves
 holdings unchanged. Symbols without a score keep their original weights, and scores for
 symbols outside the holdings are ignored. Redistribution stays within the scored sleeve's

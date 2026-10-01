@@ -27,7 +27,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         "combined_weights": snap.combined_weights,
     }
     out = Path(args.out) if args.out else None
-    text = json.dumps(payload, indent=2, ensure_ascii=False)
+    text = json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False)
     if out:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(text, encoding="utf-8")

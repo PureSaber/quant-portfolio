@@ -64,6 +64,9 @@ def test_positive_factor_tilt_preserves_invested_budget(tmp_path, scale):
         tmp_path, ["AAA", "BBB"], scale=scale, factor_symbols=["AAA", "BBB"], tilt=0.25
     )
     weights = result["combined_weights"]
+    assert result["total_nav"] == 100000
+    assert result["books"][0]["capital_weight"] == 1.0
+    assert result["books"][0]["cash_weight"] == pytest.approx(1.0 - scale)
     assert set(weights) == {"AAA", "BBB"}
     assert sum(weights.values()) == pytest.approx(scale, abs=1e-6)
     assert all(value >= 0 for value in weights.values())

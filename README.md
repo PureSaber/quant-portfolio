@@ -124,6 +124,13 @@ for the required sleeve change fails explicitly. The `cost_aware` mode accepts t
 factor inputs plus a validated `covariance_override`. Factor bounds stay absolute unless
 `factor_bound_reference` is `active`. Benchmark-relative inputs and square-root impact
 require an invested limit of 1, because the sleeve solver is fully invested.
+The `equal` mode also accepts absolute factor bounds. It projects its 1/N target
+onto the joint budget, position, factor and turnover feasible set, including
+liquidation outside the selected universe. Bounds remain fractions of total NAV,
+so a cash sleeve does not rescale the declared economic exposure limits.
+An optional covariance override is checked for finite values, symmetry and PSD
+but does not change the equal-weight objective. Tracking-error checks remain the
+caller's responsibility; the equal mode does not claim covariance optimization.
 Missing model inputs, non-finite values, incomplete covariance estimates,
 and solver non-convergence also fail closed.
 

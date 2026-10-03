@@ -11,7 +11,7 @@ def test_regime_scale_flows_into_portfolio(tmp_path) -> None:
     from quant_regime.cross_asset import detect_cross_asset
 
     series = tmp_path / "series.csv"
-    pd.DataFrame({"date": pd.date_range("2024-01-01", periods=80), "close": range(80)}).to_csv(
+    pd.DataFrame({"date": pd.date_range("2024-01-01", periods=80), "close": range(1, 81)}).to_csv(
         series, index=False
     )
     inputs = [

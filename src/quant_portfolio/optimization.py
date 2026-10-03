@@ -252,6 +252,29 @@ def validate_research_allocation(value: Mapping[str, object]) -> dict[str, objec
     return normalized
 
 
+def _validated_covariance(covariance: pd.DataFrame, assets: list[str]) -> np.ndarray:
+    if not isinstance(covariance, pd.DataFrame):
+        raise TypeError("covariance must be a pandas DataFrame")
+    if not covariance.index.is_unique or not covariance.columns.is_unique:
+        raise ValueError("covariance asset labels must be unique")
+    missing_rows = sorted(set(assets) - set(covariance.index), key=str)
+    missing_columns = sorted(set(assets) - set(covariance.columns), key=str)
+    if missing_rows or missing_columns:
+        raise ValueError(
+            f"covariance is missing assets: rows={missing_rows}, columns={missing_columns}"
+        )
+    numeric = covariance.reindex(index=assets, columns=assets).apply(pd.to_numeric, errors="coerce")
+    if numeric.isna().any().any() or not np.isfinite(numeric.to_numpy(dtype=float)).all():
+        raise ValueError("covariance must contain finite values for every asset pair")
+    values = numeric.to_numpy(dtype=float)
+    if not np.allclose(values, values.T, rtol=1e-10, atol=1e-12):
+        raise ValueError("covariance must be symmetric")
+    eigenvalue_tolerance = max(float(np.max(np.abs(values))) * 1e-10, 1e-12)
+    if float(np.linalg.eigvalsh(values).min()) < -eigenvalue_tolerance:
+        raise ValueError("covariance must be positive semidefinite")
+    return values
+
+
 def _research_covariance(
     settings: Mapping[str, object],
     window: pd.DataFrame | None,
@@ -344,7 +367,10 @@ def research_allocation_weights(
 ) -> pd.Series:
     """Build long-only research weights with one explicit, closed allocation policy.
 
-    ``equal`` is 1/N. ``inverse_vol`` ignores correlation. ``risk_parity`` equalizes
+    ``equal`` targets 1/N; with factor bounds it minimizes squared distance to
+    that target over the joint budget, position, factor and turnover constraints.
+    Its optional covariance is validated risk evidence, not an objective term.
+    ``inverse_vol`` ignores correlation. ``risk_parity`` equalizes
     ``w_i (Σw)_i``. ``hrp`` is hierarchical risk parity. ``cvar``, ``evar`` and
     ``cdar`` maximize the score minus a path risk. ``max_sharpe`` and
     ``max_diversification`` are ratio objectives. ``cost_aware`` delegates to
@@ -397,19 +423,47 @@ def research_allocation_weights(
     outside_turnover = float(current_all.loc[~current_all.index.isin(assets)].sum())
     turnover_limit = float(settings["max_turnover"])
     mode = str(settings["mode"])
-    if mode not in _COVARIANCE_MODES and any(
+    if mode not in _COVARIANCE_MODES | {"equal"} and any(
         value is not None for value in (factor_exposures, factor_bounds, covariance_override)
     ):
         raise ValueError(
             "factor constraints and covariance_override are only supported for "
-            "cost_aware, risk_parity and hrp"
+            "equal, cost_aware, risk_parity, hrp, max_sharpe and max_diversification"
         )
-    if mode != "cost_aware" and any(
+    if mode not in {"equal", "cost_aware"} and any(
         value is not None for value in (factor_exposures, factor_bounds)
     ):
-        raise ValueError("factor constraints are only supported for cost_aware")
+        raise ValueError("factor constraints are only supported for equal and cost_aware")
     if mode == "equal":
+        if covariance_override is not None:
+            _validated_covariance(covariance_override, assets)
+        exposures, bounds = _validated_factor_constraints(assets, factor_exposures, factor_bounds)
         desired = np.repeat(total / len(assets), len(assets))
+        if exposures is not None:
+            # The joint projector uses a unit-budget sleeve. All absolute
+            # portfolio limits, including liquidation outside the sleeve, scale
+            # by the same invested fraction; cash has zero factor exposure.
+            constraints = _validated_constraints(
+                OptimizationConstraints(
+                    max_weight=min(1.0, cap / total),
+                    max_turnover=turnover_limit / total,
+                ),
+                assets,
+            )
+            weights = _project_joint_feasible_set(
+                desired / total,
+                assets,
+                current.to_numpy(dtype=float) / total,
+                outside_turnover / total,
+                constraints,
+                exposures,
+                {
+                    factor: (lower / total, upper / total)
+                    for factor, (lower, upper) in bounds.items()
+                },
+                tolerance=1e-10,
+            )
+            return pd.Series(weights * total, index=assets, name="weight")
         weights = _constrain_turnover(
             desired,
             current.to_numpy(dtype=float),
@@ -1357,33 +1411,7 @@ def optimize_mean_variance(
         or tolerance <= 0
     ):
         raise ValueError("tolerance must be positive and finite")
-    if not isinstance(covariance, pd.DataFrame):
-        raise TypeError("covariance must be a pandas DataFrame")
-    if not covariance.index.is_unique or not covariance.columns.is_unique:
-        raise ValueError("covariance asset labels must be unique")
-    missing_rows = sorted(set(assets) - set(covariance.index), key=str)
-    missing_columns = sorted(set(assets) - set(covariance.columns), key=str)
-    if missing_rows or missing_columns:
-        raise ValueError(
-            f"covariance is missing assets: rows={missing_rows}, columns={missing_columns}"
-        )
-    numeric_covariance = (
-        covariance.copy(deep=True)
-        .reindex(index=assets, columns=assets)
-        .apply(pd.to_numeric, errors="coerce")
-    )
-    if (
-        numeric_covariance.isna().any().any()
-        or not np.isfinite(numeric_covariance.to_numpy(dtype=float)).all()
-    ):
-        raise ValueError("covariance must contain finite values for every asset pair")
-    cov = numeric_covariance.to_numpy(dtype=float)
-    if not np.allclose(cov, cov.T, rtol=1e-10, atol=1e-12):
-        raise ValueError("covariance must be symmetric")
-    covariance_eigenvalues = np.linalg.eigvalsh(cov)
-    eigenvalue_tolerance = max(float(np.max(np.abs(cov))) * 1e-10, 1e-12)
-    if float(covariance_eigenvalues.min()) < -eigenvalue_tolerance:
-        raise ValueError("covariance must be positive semidefinite")
+    cov = _validated_covariance(covariance, assets)
 
     settings = _validated_constraints(constraints, assets)
     validated_exposures, validated_factor_bounds = _validated_factor_constraints(
@@ -1466,7 +1494,7 @@ def optimize_mean_variance(
         if not np.isfinite(costs).all() or (costs < 0).any():
             raise ValueError("linear_costs must be finite and non-negative for every asset")
     mu = numeric_expected.to_numpy(dtype=float)
-    largest_eigenvalue = max(float(covariance_eigenvalues.max()), 1e-12)
+    largest_eigenvalue = max(float(np.linalg.eigvalsh(cov).max()), 1e-12)
     impact_lipschitz = 0.0
     if impact is not None:
         adv, vol, coefficient, nav = impact

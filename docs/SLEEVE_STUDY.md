@@ -49,7 +49,8 @@ Each evolves its own actual holdings; infeasible rebalances fail instead of rela
 constraints. This research wrapper does not claim common venue, margin or nonlinear
 execution constraints; those remain the cross-asset optimizer's boundary.
 
-Each evaluation period declares realized base-currency `cash_return`. With target weights
+Each evaluation period declares realized base-currency `cash_return` and `cash_known_at`,
+which must be no earlier than period end and no later than evaluation. With target weights
 w, drifted current weights h and linear overlay rates c:
 
 * turnover is `sum(abs(w-h))` (two-way sleeve notional, excluding the cash leg);

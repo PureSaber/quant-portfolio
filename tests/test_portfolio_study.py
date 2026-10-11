@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import json
 
 import numpy as np
@@ -13,6 +14,7 @@ from quant_portfolio.portfolio_study import (
     main,
     normalize_observations,
 )
+from quant_portfolio.study_io import publish
 
 
 def study():
@@ -70,6 +72,7 @@ def study():
                 "start": dates[i].isoformat(),
                 "end": dates[i + 1].isoformat(),
                 "cash_return": 0.001,
+                "cash_known_at": dates[i + 1].isoformat(),
             }
         )
     return spec
@@ -99,6 +102,34 @@ def test_common_constraints_cash_cost_and_drift_independent_replay():
             cash = remaining * 0.1 * 1.001
             assert row["closing_capital"] == pytest.approx(cash + equity + bond)
             assert pd.Timestamp(row["history_coverage"]["latest_input_available_at"]) <= start
+
+
+def test_publish_digest_is_bound_to_the_bytes_actually_evaluated(tmp_path):
+    source, target = tmp_path / "input.json", tmp_path / "result.json"
+    original = b'\xef\xbb\xbf{"value": 1}\n'
+    replacement = b'{"value": 2}\n'
+    source.write_bytes(original)
+
+    def evaluate(spec):
+        source.write_bytes(replacement)
+        return {"computed_value": spec["value"]}
+
+    report = publish(source, target, evaluate)
+    assert report["computed_value"] == 1
+    assert report["input_sha256"] == hashlib.sha256(original).hexdigest()
+    assert report["input_sha256"] != hashlib.sha256(source.read_bytes()).hexdigest()
+    assert json.loads(target.read_text())["input_sha256"] == report["input_sha256"]
+
+
+def test_cash_maturity_and_exact_cost_universe():
+    spec = study()
+    spec["evaluation_periods"][0]["cash_known_at"] = "2026-01-01T00:00:00Z"
+    with pytest.raises(ValueError, match="cash return"):
+        evaluate_study(spec)
+    spec = study()
+    spec["linear_costs"]["not-a-sleeve"] = 0
+    with pytest.raises(ValueError, match="exactly"):
+        evaluate_study(spec)
 
 
 def test_future_revision_cannot_change_earlier_decisions_and_fx_cross_term():

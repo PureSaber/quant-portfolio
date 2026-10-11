@@ -43,9 +43,10 @@ def digest(value):
 def publish(input_path, output, evaluator):
     """Evaluate completely before exclusive creation; never overwrite a prior report."""
     source = Path(input_path)
-    spec = json.loads(source.read_text(encoding="utf-8-sig"))
+    raw = source.read_bytes()
+    spec = json.loads(raw.decode("utf-8-sig"))
     result = evaluator(spec)
-    result["input_sha256"] = hashlib.sha256(source.read_bytes()).hexdigest()
+    result["input_sha256"] = hashlib.sha256(raw).hexdigest()
     payload = json.dumps(result, indent=2, allow_nan=False) + "\n"
     target = Path(output)
     target.parent.mkdir(parents=True, exist_ok=True)

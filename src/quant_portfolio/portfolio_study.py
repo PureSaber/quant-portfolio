@@ -141,6 +141,8 @@ def evaluate_study(spec):
     cap = number(spec["max_weight"], "max_weight", positive=True)
     if invested > 1 or cap > 1 or cap * len(names) < invested:
         raise ValueError("infeasible investment or position cap")
+    if set(spec["linear_costs"]) != set(names):
+        raise ValueError("linear costs must cover exactly the sleeves")
     costs = pd.Series({k: number(spec["linear_costs"][k], "linear_cost", minimum=0) for k in names})
     held0 = pd.Series({k: number(spec["initial_weights"][k], "weight", minimum=0) for k in names})
     if set(spec["initial_weights"]) != set(names) or held0.sum() > 1 + 1e-12:
@@ -151,6 +153,8 @@ def evaluate_study(spec):
     for raw in spec["evaluation_periods"]:
         start, end = timestamp(raw["start"]), timestamp(raw["end"])
         cash = number(raw["cash_return"], "cash_return", minimum=-1)
+        if not end <= timestamp(raw["cash_known_at"]) <= as_of:
+            raise ValueError("cash return must be mature and available by evaluation_as_of")
         if start >= end or end > as_of or (periods and start != periods[-1][1]):
             raise ValueError("evaluation periods must be contiguous, ordered and mature")
         if (start, end) not in realized.index:

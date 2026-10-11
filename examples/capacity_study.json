@@ -1,0 +1,59 @@
+{
+  "schema": "quant-portfolio.capacity-study/v1",
+  "base_currency": "USD",
+  "data_nature": "synthetic",
+  "as_of": "2025-01-01T00:00:00Z",
+  "max_liquidity_age_days": 1,
+  "holdings_weights": {
+    "A": 0.6,
+    "B": -0.4
+  },
+  "trade_weights": {
+    "A": 0.1,
+    "B": -0.2
+  },
+  "max_participation": 0.1,
+  "execution_days": 2,
+  "liquidation_days": 3,
+  "cost_budget_return": 0.002,
+  "capital": [
+    1000000,
+    4000000
+  ],
+  "turnover_scales": [
+    1,
+    2
+  ],
+  "liquidity_scales": [
+    1,
+    0.5
+  ],
+  "impact_coefficients": [
+    0,
+    0.2
+  ],
+  "volatility_scales": [
+    1,
+    2
+  ],
+  "liquidity": [
+    {
+      "asset": "A",
+      "adv_base": 1000000,
+      "daily_volatility": 0.02,
+      "linear_rate": 0.001,
+      "observed_at": "2025-01-01T00:00:00Z",
+      "known_at": "2025-01-01T00:00:00Z",
+      "source_ref": "synthetic:test"
+    },
+    {
+      "asset": "B",
+      "adv_base": 2000000,
+      "daily_volatility": 0.03,
+      "linear_rate": 0.001,
+      "observed_at": "2025-01-01T00:00:00Z",
+      "known_at": "2025-01-01T00:00:00Z",
+      "source_ref": "synthetic:test"
+    }
+  ]
+}

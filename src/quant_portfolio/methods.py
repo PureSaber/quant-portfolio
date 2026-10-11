@@ -237,31 +237,44 @@ def equal_risk_contribution_weights(
 ) -> pd.Series:
     """Long-only equal risk contribution (Maillard, Roncalli, Teiletche).
 
-    Correlated assets share one risk budget. The fixed point is
-    ``w_i (Σw)_i`` equal across assets and ``sum(w) = 1``.
+    Correlated assets share one risk budget. Cyclical coordinate descent on
+    ``x'Σx / 2 - sum(log(x)) / n`` permits negative intermediate marginal
+    contributions. Its positive stationary point has ``x_i (Σx)_i = 1/n``;
+    normalizing x gives the fully invested risk parity weights.
     """
 
     cov, assets = _validated_covariance(covariance)
     if (np.diag(cov) <= 0).any():
         raise ValueError("equal risk contribution requires positive asset variance")
-    weights = np.full(len(assets), 1.0 / len(assets))
+    if (
+        isinstance(max_iterations, bool)
+        or not isinstance(max_iterations, int)
+        or max_iterations < 1
+    ):
+        raise ValueError("max_iterations must be a positive integer")
+    if isinstance(tolerance, bool) or not np.isfinite(tolerance) or tolerance <= 0:
+        raise ValueError("tolerance must be positive and finite")
+    scaled = cov / float(np.diag(cov).max())
+    budget = 1.0 / len(assets)
+    x = np.sqrt(budget / np.diag(scaled))
     converged = False
     for _ in range(max_iterations):
-        contribution = weights * (cov @ weights)
-        if not np.isfinite(contribution).all() or (contribution <= 0).any():
-            raise ValueError("equal risk contribution produced a non-positive risk contribution")
-        target = weights * (float(contribution.mean()) / contribution)
-        target /= target.sum()
-        updated = 0.5 * weights + 0.5 * target
-        if float(np.max(np.abs(updated - weights))) <= tolerance:
-            weights = updated
+        for i in range(len(assets)):
+            other = float(scaled[i] @ x - scaled[i, i] * x[i])
+            root = np.hypot(other, 2 * np.sqrt(scaled[i, i] * budget))
+            # Rationalized positive root avoids cancellation when other > 0.
+            x[i] = (
+                2 * budget / (root + other) if other >= 0 else (root - other) / (2 * scaled[i, i])
+            )
+        contribution = x * (scaled @ x)
+        if float(np.max(np.abs(contribution / budget - 1))) <= tolerance:
             converged = True
             break
-        weights = updated
     if not converged:
         raise RuntimeError(
             f"equal risk contribution did not converge after {max_iterations} iterations"
         )
+    weights = x / x.sum()
     contribution = weights * (cov @ weights)
     gap = float(np.max(np.abs(contribution - contribution.mean())))
     if gap > max(1e-6, 1e-4 * float(np.abs(contribution.mean()))):

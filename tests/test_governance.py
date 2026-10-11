@@ -30,7 +30,7 @@ def test_workspace_declaration_and_internal_release_tags_are_locked() -> None:
         in dependencies
     )
     assert (
-        "quant-execution @ git+https://github.com/PureSaber/quant-execution.git@42e0854b1988d4d056d3597a92b343f8a046f8e3"
+        "quant-execution @ git+https://github.com/PureSaber/quant-execution.git@49ef53d2c502ad6faad6818f853dadd1f8b8b182"
         in dependencies
     )
 
@@ -40,7 +40,7 @@ def test_workspace_declaration_and_internal_release_tags_are_locked() -> None:
         in lock
     )
     assert (
-        "quant-execution @ git+https://github.com/PureSaber/quant-execution.git@42e0854b1988d4d056d3597a92b343f8a046f8e3"
+        "quant-execution @ git+https://github.com/PureSaber/quant-execution.git@49ef53d2c502ad6faad6818f853dadd1f8b8b182"
         in lock
     )
     assert 'tomli==2.4.1 ; python_version < "3.11"' in lock

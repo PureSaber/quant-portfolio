@@ -74,6 +74,8 @@ For exact-period, multi-currency strategy/asset results, the
 [PIT sleeve study](docs/SLEEVE_STUDY.md) adds causal dynamic allocation, same-constraint
 benchmarks, cash/FX handling, correlation and diversification diagnostics. It reuses the
 existing allocators and requires explicit return/publication semantics from producers.
+The [capacity and cost study](docs/CAPACITY_STUDY.md) scans capital, turnover and liquidity
+with the existing cost models and offers chronological, explicitly noncausal cost diagnostics.
 
 ```bash
 quant-portfolio optimize \

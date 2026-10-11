@@ -1,0 +1,35 @@
+{
+  "schema": "quant.capital-market/v1",
+  "observations": [
+    {
+      "observation_id": "o1",
+      "at": "2026-01-02T00:00:00Z",
+      "available_at": "2026-01-02T00:00:00Z",
+      "prices": {
+        "A": "125",
+        "B": "50"
+      },
+      "fx": {}
+    },
+    {
+      "observation_id": "o2",
+      "at": "2026-01-03T00:00:00Z",
+      "available_at": "2026-01-03T00:00:00Z",
+      "prices": {
+        "A": "101",
+        "B": "50"
+      },
+      "fx": {}
+    },
+    {
+      "observation_id": "o3",
+      "at": "2026-01-04T00:00:00Z",
+      "available_at": "2026-01-04T00:00:00Z",
+      "prices": {
+        "A": "110",
+        "B": "50"
+      },
+      "fx": {}
+    }
+  ]
+}

@@ -1,0 +1,113 @@
+{
+  "schema": "quant.capital-plan/v1",
+  "evidence_kind": "synthetic",
+  "sample_kind": "deterministic_fixture",
+  "instruments": [
+    {
+      "instrument_id": "A",
+      "asset_class": "etf",
+      "product_type": "cash_etf",
+      "venue": "SYNTHETIC",
+      "native_symbol": "A",
+      "base_currency": null,
+      "quote_currency": null,
+      "settlement_currency": "USD",
+      "price_tick": {
+        "units": 1,
+        "scale": 2
+      },
+      "quantity_step": {
+        "units": 1,
+        "scale": 0
+      },
+      "contract_multiplier": {
+        "units": 1,
+        "scale": 0
+      },
+      "calendar_id": "explicit_fixture",
+      "margin_mode": "none",
+      "inverse": false,
+      "effective_from": "2026-01-01T00:00:00Z",
+      "effective_to": null,
+      "available_at": "2026-01-01T00:00:00Z",
+      "superseded_at": null,
+      "underlying_id": null,
+      "expiry_date": null,
+      "metadata": {}
+    },
+    {
+      "instrument_id": "B",
+      "asset_class": "etf",
+      "product_type": "cash_etf",
+      "venue": "SYNTHETIC",
+      "native_symbol": "B",
+      "base_currency": null,
+      "quote_currency": null,
+      "settlement_currency": "USD",
+      "price_tick": {
+        "units": 1,
+        "scale": 2
+      },
+      "quantity_step": {
+        "units": 1,
+        "scale": 0
+      },
+      "contract_multiplier": {
+        "units": 1,
+        "scale": 0
+      },
+      "calendar_id": "explicit_fixture",
+      "margin_mode": "none",
+      "inverse": false,
+      "effective_from": "2026-01-01T00:00:00Z",
+      "effective_to": null,
+      "available_at": "2026-01-01T00:00:00Z",
+      "superseded_at": null,
+      "underlying_id": null,
+      "expiry_date": null,
+      "metadata": {}
+    }
+  ],
+  "owners": {
+    "A": "alpha",
+    "B": "beta"
+  },
+  "allocations": {
+    "alpha": {
+      "USD": "600"
+    },
+    "beta": {
+      "USD": "400"
+    }
+  },
+  "base_currency": "USD",
+  "opened_at": "2026-01-01T00:00:00Z",
+  "opening_fx": {},
+  "cost_policy": {
+    "model": "explicit_fee_per_unit",
+    "fee_per_unit": "1"
+  },
+  "valuation_policy": {
+    "model": "last_available_mark_and_fx",
+    "positive_futures_pnl_spendable": false
+  },
+  "decisions": [
+    {
+      "decision_id": "buy-a",
+      "signal_observation_id": "o1",
+      "execution_observation_id": "o2",
+      "instrument_id": "A",
+      "target_notional": "500",
+      "settles_at": "2026-01-03T00:00:00Z"
+    },
+    {
+      "decision_id": "buy-b",
+      "signal_observation_id": "o1",
+      "execution_observation_id": "o2",
+      "instrument_id": "B",
+      "target_notional": "300",
+      "settles_at": "2026-01-03T00:00:00Z"
+    }
+  ],
+  "cash_events": []
+}

@@ -1,0 +1,237 @@
+{
+  "schema": "quant-portfolio.sleeve-study/v1",
+  "data_nature": "synthetic",
+  "base_currency": "USD",
+  "evaluation_as_of": "2025-01-09T00:00:00+00:00",
+  "sleeves": [
+    {
+      "id": "equity",
+      "currency": "USD",
+      "source_ref": "synthetic:test",
+      "return_basis": "net_simple_total_return"
+    },
+    {
+      "id": "bond",
+      "currency": "USD",
+      "source_ref": "synthetic:test",
+      "return_basis": "net_simple_total_return"
+    }
+  ],
+  "observations": [
+    {
+      "sleeve": "equity",
+      "start": "2025-01-01T00:00:00+00:00",
+      "end": "2025-01-02T00:00:00+00:00",
+      "known_at": "2025-01-02T00:00:00+00:00",
+      "net_return": 0.01,
+      "fx_start": 1.0,
+      "fx_end": 1.0,
+      "fx_start_known_at": "2025-01-01T00:00:00+00:00",
+      "fx_end_known_at": "2025-01-02T00:00:00+00:00"
+    },
+    {
+      "sleeve": "equity",
+      "start": "2025-01-02T00:00:00+00:00",
+      "end": "2025-01-03T00:00:00+00:00",
+      "known_at": "2025-01-03T00:00:00+00:00",
+      "net_return": -0.02,
+      "fx_start": 1.0,
+      "fx_end": 1.0,
+      "fx_start_known_at": "2025-01-02T00:00:00+00:00",
+      "fx_end_known_at": "2025-01-03T00:00:00+00:00"
+    },
+    {
+      "sleeve": "equity",
+      "start": "2025-01-03T00:00:00+00:00",
+      "end": "2025-01-04T00:00:00+00:00",
+      "known_at": "2025-01-04T00:00:00+00:00",
+      "net_return": 0.03,
+      "fx_start": 1.0,
+      "fx_end": 1.0,
+      "fx_start_known_at": "2025-01-03T00:00:00+00:00",
+      "fx_end_known_at": "2025-01-04T00:00:00+00:00"
+    },
+    {
+      "sleeve": "equity",
+      "start": "2025-01-04T00:00:00+00:00",
+      "end": "2025-01-05T00:00:00+00:00",
+      "known_at": "2025-01-05T00:00:00+00:00",
+      "net_return": 0.01,
+      "fx_start": 1.0,
+      "fx_end": 1.0,
+      "fx_start_known_at": "2025-01-04T00:00:00+00:00",
+      "fx_end_known_at": "2025-01-05T00:00:00+00:00"
+    },
+    {
+      "sleeve": "equity",
+      "start": "2025-01-05T00:00:00+00:00",
+      "end": "2025-01-06T00:00:00+00:00",
+      "known_at": "2025-01-06T00:00:00+00:00",
+      "net_return": -0.01,
+      "fx_start": 1.0,
+      "fx_end": 1.0,
+      "fx_start_known_at": "2025-01-05T00:00:00+00:00",
+      "fx_end_known_at": "2025-01-06T00:00:00+00:00"
+    },
+    {
+      "sleeve": "equity",
+      "start": "2025-01-06T00:00:00+00:00",
+      "end": "2025-01-07T00:00:00+00:00",
+      "known_at": "2025-01-07T00:00:00+00:00",
+      "net_return": 0.04,
+      "fx_start": 1.0,
+      "fx_end": 1.0,
+      "fx_start_known_at": "2025-01-06T00:00:00+00:00",
+      "fx_end_known_at": "2025-01-07T00:00:00+00:00"
+    },
+    {
+      "sleeve": "equity",
+      "start": "2025-01-07T00:00:00+00:00",
+      "end": "2025-01-08T00:00:00+00:00",
+      "known_at": "2025-01-08T00:00:00+00:00",
+      "net_return": -0.02,
+      "fx_start": 1.0,
+      "fx_end": 1.0,
+      "fx_start_known_at": "2025-01-07T00:00:00+00:00",
+      "fx_end_known_at": "2025-01-08T00:00:00+00:00"
+    },
+    {
+      "sleeve": "equity",
+      "start": "2025-01-08T00:00:00+00:00",
+      "end": "2025-01-09T00:00:00+00:00",
+      "known_at": "2025-01-09T00:00:00+00:00",
+      "net_return": 0.01,
+      "fx_start": 1.0,
+      "fx_end": 1.0,
+      "fx_start_known_at": "2025-01-08T00:00:00+00:00",
+      "fx_end_known_at": "2025-01-09T00:00:00+00:00"
+    },
+    {
+      "sleeve": "bond",
+      "start": "2025-01-01T00:00:00+00:00",
+      "end": "2025-01-02T00:00:00+00:00",
+      "known_at": "2025-01-02T00:00:00+00:00",
+      "net_return": 0.002,
+      "fx_start": 1.0,
+      "fx_end": 1.0,
+      "fx_start_known_at": "2025-01-01T00:00:00+00:00",
+      "fx_end_known_at": "2025-01-02T00:00:00+00:00"
+    },
+    {
+      "sleeve": "bond",
+      "start": "2025-01-02T00:00:00+00:00",
+      "end": "2025-01-03T00:00:00+00:00",
+      "known_at": "2025-01-03T00:00:00+00:00",
+      "net_return": 0.003,
+      "fx_start": 1.0,
+      "fx_end": 1.0,
+      "fx_start_known_at": "2025-01-02T00:00:00+00:00",
+      "fx_end_known_at": "2025-01-03T00:00:00+00:00"
+    },
+    {
+      "sleeve": "bond",
+      "start": "2025-01-03T00:00:00+00:00",
+      "end": "2025-01-04T00:00:00+00:00",
+      "known_at": "2025-01-04T00:00:00+00:00",
+      "net_return": -0.002,
+      "fx_start": 1.0,
+      "fx_end": 1.0,
+      "fx_start_known_at": "2025-01-03T00:00:00+00:00",
+      "fx_end_known_at": "2025-01-04T00:00:00+00:00"
+    },
+    {
+      "sleeve": "bond",
+      "start": "2025-01-04T00:00:00+00:00",
+      "end": "2025-01-05T00:00:00+00:00",
+      "known_at": "2025-01-05T00:00:00+00:00",
+      "net_return": 0.005,
+      "fx_start": 1.0,
+      "fx_end": 1.0,
+      "fx_start_known_at": "2025-01-04T00:00:00+00:00",
+      "fx_end_known_at": "2025-01-05T00:00:00+00:00"
+    },
+    {
+      "sleeve": "bond",
+      "start": "2025-01-05T00:00:00+00:00",
+      "end": "2025-01-06T00:00:00+00:00",
+      "known_at": "2025-01-06T00:00:00+00:00",
+      "net_return": 0.001,
+      "fx_start": 1.0,
+      "fx_end": 1.0,
+      "fx_start_known_at": "2025-01-05T00:00:00+00:00",
+      "fx_end_known_at": "2025-01-06T00:00:00+00:00"
+    },
+    {
+      "sleeve": "bond",
+      "start": "2025-01-06T00:00:00+00:00",
+      "end": "2025-01-07T00:00:00+00:00",
+      "known_at": "2025-01-07T00:00:00+00:00",
+      "net_return": -0.003,
+      "fx_start": 1.0,
+      "fx_end": 1.0,
+      "fx_start_known_at": "2025-01-06T00:00:00+00:00",
+      "fx_end_known_at": "2025-01-07T00:00:00+00:00"
+    },
+    {
+      "sleeve": "bond",
+      "start": "2025-01-07T00:00:00+00:00",
+      "end": "2025-01-08T00:00:00+00:00",
+      "known_at": "2025-01-08T00:00:00+00:00",
+      "net_return": 0.004,
+      "fx_start": 1.0,
+      "fx_end": 1.0,
+      "fx_start_known_at": "2025-01-07T00:00:00+00:00",
+      "fx_end_known_at": "2025-01-08T00:00:00+00:00"
+    },
+    {
+      "sleeve": "bond",
+      "start": "2025-01-08T00:00:00+00:00",
+      "end": "2025-01-09T00:00:00+00:00",
+      "known_at": "2025-01-09T00:00:00+00:00",
+      "net_return": 0.002,
+      "fx_start": 1.0,
+      "fx_end": 1.0,
+      "fx_start_known_at": "2025-01-08T00:00:00+00:00",
+      "fx_end_known_at": "2025-01-09T00:00:00+00:00"
+    }
+  ],
+  "evaluation_periods": [
+    {
+      "start": "2025-01-05T00:00:00+00:00",
+      "end": "2025-01-06T00:00:00+00:00",
+      "cash_return": 0.001
+    },
+    {
+      "start": "2025-01-06T00:00:00+00:00",
+      "end": "2025-01-07T00:00:00+00:00",
+      "cash_return": 0.001
+    },
+    {
+      "start": "2025-01-07T00:00:00+00:00",
+      "end": "2025-01-08T00:00:00+00:00",
+      "cash_return": 0.001
+    },
+    {
+      "start": "2025-01-08T00:00:00+00:00",
+      "end": "2025-01-09T00:00:00+00:00",
+      "cash_return": 0.001
+    }
+  ],
+  "allocation": {
+    "mode": "risk_parity",
+    "lookback": 4,
+    "min_observations": 3,
+    "max_turnover": 1.0
+  },
+  "max_weight": 0.65,
+  "invested_limit": 0.9,
+  "initial_capital": 1000,
+  "initial_weights": {
+    "equity": 0.45,
+    "bond": 0.45
+  },
+  "linear_costs": {
+    "equity": 0.001,
+    "bond": 0.002
+  }
+}

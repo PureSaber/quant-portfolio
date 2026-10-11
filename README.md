@@ -70,6 +70,11 @@ Security identifiers are strings: CSV input preserves leading zeros and identifi
 
 ## Cost-aware optimizer
 
+For exact-period, multi-currency strategy/asset results, the
+[PIT sleeve study](docs/SLEEVE_STUDY.md) adds causal dynamic allocation, same-constraint
+benchmarks, cash/FX handling, correlation and diversification diagnostics. It reuses the
+existing allocators and requires explicit return/publication semantics from producers.
+
 ```bash
 quant-portfolio optimize \
   --expected-returns expected_returns.csv \

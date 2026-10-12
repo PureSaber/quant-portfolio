@@ -69,3 +69,6 @@ jobs:
         run: |
           python scripts/run_synthetic_demo.py --out "$RUNNER_TEMP/synthetic-demo"
           grep -q "SYNTHETIC DEMONSTRATION" "$RUNNER_TEMP/synthetic-demo/metrics.json"
+
+      - name: Continuous capital and immutable revision CLI acceptance
+        run: python scripts/run_continuous_demo.py --out "$RUNNER_TEMP/continuous-demo"

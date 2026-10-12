@@ -111,6 +111,9 @@ def cmd_optimize(args: argparse.Namespace) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="quant-portfolio")
     sub = p.add_subparsers(dest="command", required=True)
+    from quant_portfolio.continuous_study import add_parsers
+
+    add_parsers(sub)
     status = sub.add_parser("status", help="Combine strategy books into portfolio view")
     status.add_argument("--config", required=True)
     status.add_argument("--out", default="")

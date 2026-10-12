@@ -1,5 +1,8 @@
 # Quant Research Portfolio
 
+[Continuous shared capital and paired revisions](docs/CONTINUOUS_CAPITAL.md) add
+a runnable frozen-policy study on QExec's shared account and QDK's immutable lineage.
+
 A small, reviewable portfolio of quantitative-research engineering patterns:
 
 - deterministic synthetic data generation;

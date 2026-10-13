@@ -1,5 +1,13 @@
 # Quant Research Portfolio
 
+The legacy CSV allocator requires NAVs at one common snapshot time by default.
+Set `as_of` for a historical cutoff and `max_nav_age_days` to explicitly permit older NAVs;
+carried values are reported with warnings and their age. Holdings must be unique by symbol,
+long-only, total at most one, and dated at the selected NAV. Historical undated files require
+`holdings_as_of` on the strategy entry. Undated latest holdings remain supported with an
+unverified-time warning; future `available_at` values are rejected in either case.
+These CSV status results do not certify a replayed shared account.
+
 [Continuous shared capital and paired revisions](docs/CONTINUOUS_CAPITAL.md) add
 a runnable frozen-policy study on QExec's shared account and QDK's immutable lineage.
 

@@ -17,6 +17,7 @@ class StrategyBook:
     nav_path: Path
     weight: float = 1.0
     position_scale: float = 1.0
+    holdings_as_of: str | None = None
 
 
 @dataclass
@@ -25,6 +26,7 @@ class PortfolioSnapshot:
     total_nav: float
     books: list[dict] = field(default_factory=list)
     combined_weights: dict[str, float] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
 
 
 def load_config(path: Path) -> dict:
@@ -82,7 +84,11 @@ def _read_holdings(path: Path) -> pd.DataFrame:
     if "symbol" not in df.columns or "weight" not in df.columns:
         raise ValueError(f"holdings need symbol,weight columns: {path}")
     df["weight"] = df["weight"].map(lambda value: _finite_number(value, "holdings.weight"))
-    return df[["symbol", "weight"]].copy()
+    if df["symbol"].duplicated().any():
+        raise ValueError("holdings snapshot requires one row per symbol")
+    if df["weight"].lt(0).any() or df["weight"].sum() > 1 + 1e-12:
+        raise ValueError("holdings snapshot must be long-only with total weight at most 1")
+    return df.copy()
 
 
 def _read_factor_scores(path: Path, column: str, *, as_of: str, undated_as_of=None) -> pd.Series:
@@ -154,6 +160,7 @@ def allocate(config: dict) -> PortfolioSnapshot:
                 nav_path=Path(entry["nav"]),
                 weight=weight,
                 position_scale=scale,
+                holdings_as_of=entry.get("holdings_as_of"),
             )
         )
 
@@ -167,9 +174,26 @@ def allocate(config: dict) -> PortfolioSnapshot:
     combined: dict[str, float] = {}
     total_nav = 0.0
 
-    for book in books:
-        nav_df = _read_nav(book.nav_path)
-        latest = nav_df.iloc[-1]
+    navs = [_read_nav(book.nav_path) for book in books]
+    as_of = config.get("as_of") or max(
+        (str(frame.iloc[-1]["date"]) for frame in navs), key=_observation_time
+    )
+    cutoff = _observation_time(as_of)
+    max_age = _finite_number(config.get("max_nav_age_days", 0), "max_nav_age_days")
+    if max_age < 0:
+        raise ValueError("max_nav_age_days must be nonnegative")
+    warnings = []
+
+    for book, nav_df in zip(books, navs, strict=True):
+        eligible = nav_df[nav_df["_time"] <= cutoff]
+        if eligible.empty:
+            raise ValueError(f"{book.name}: no NAV available at portfolio as_of")
+        latest = eligible.iloc[-1]
+        age = (cutoff - latest["_time"]).total_seconds() / 86400
+        if age > max_age:
+            raise ValueError(f"{book.name}: stale or mismatched NAV date; age={age:g} days")
+        if age:
+            warnings.append(f"{book.name}: carried NAV is {age:g} days old")
         capital_weight = book.weight / total_weight
         scaled_weight = capital_weight * book.position_scale
         # Exposure scaling leaves capital in cash; it does not destroy account NAV.
@@ -179,6 +203,7 @@ def allocate(config: dict) -> PortfolioSnapshot:
                 "name": book.name,
                 "as_of": str(latest["date"]),
                 "nav": float(latest["nav"]),
+                "nav_age_days": age,
                 "capital_weight": round(capital_weight, 6),
                 "budget_weight": round(scaled_weight, 6),
                 "cash_weight": round(capital_weight - scaled_weight, 6),
@@ -187,11 +212,22 @@ def allocate(config: dict) -> PortfolioSnapshot:
         holdings_path = Path(str(book.nav_path).replace("nav.csv", "holdings.csv"))
         if holdings_path.is_file():
             h = _read_holdings(holdings_path)
+            if "date" not in h and book.holdings_as_of is not None:
+                h["date"] = book.holdings_as_of
+            if "date" in h:
+                if not h["date"].map(_observation_time).eq(latest["_time"]).all():
+                    raise ValueError(
+                        f"{book.name}: holdings date must match the selected NAV snapshot"
+                    )
+            elif config.get("as_of"):
+                raise ValueError(f"{book.name}: historical holdings require date or holdings_as_of")
+            else:
+                warnings.append(f"{book.name}: undated holdings; snapshot time is unverified")
+            if "available_at" in h and (h["available_at"].map(_observation_time) > cutoff).any():
+                raise ValueError(f"{book.name}: holdings were not available at portfolio as_of")
             for _, row in h.iterrows():
                 sym = str(row["symbol"])
                 combined[sym] = combined.get(sym, 0.0) + float(row["weight"]) * scaled_weight
-
-    as_of = max((r["as_of"] for r in nav_rows), key=_observation_time)
 
     factor_cfg = config.get("factor_scores") or {}
     if factor_cfg.get("path"):
@@ -215,4 +251,5 @@ def allocate(config: dict) -> PortfolioSnapshot:
         total_nav=round(total_nav, 4),
         books=nav_rows,
         combined_weights={k: round(v, 6) for k, v in sorted(combined.items())},
+        warnings=warnings,
     )

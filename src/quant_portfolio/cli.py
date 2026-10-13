@@ -25,6 +25,8 @@ def cmd_status(args: argparse.Namespace) -> int:
         "total_nav": snap.total_nav,
         "books": snap.books,
         "combined_weights": snap.combined_weights,
+        "warnings": snap.warnings,
+        "snapshot_time_verified": not snap.warnings,
     }
     out = Path(args.out) if args.out else None
     text = json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False)

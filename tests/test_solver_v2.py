@@ -234,6 +234,28 @@ def test_factor_dense_risk_and_gradient_agree_without_materialization():
     assert gradient == pytest.approx(2 * dense.covariance @ w, rel=1e-8)
 
 
+@pytest.mark.parametrize("return_model", ["score", "ic_vol"])
+def test_legacy_benchmark_does_not_silently_change_absolute_risk_objective(return_model):
+    assets = list("AB")
+    common = {
+        "scores": pd.Series([0.001, 0.002], index=assets),
+        "trailing_returns": None,
+        "current_weights": pd.Series([0.5, 0.5], index=assets),
+        "linear_costs": None,
+        "invested_limit": 1.0,
+        "max_weight": 1.0,
+        "decision_at": "2026-01-02T07:00Z",
+        "config": {"mode": "cost_aware", "expected_return_model": return_model},
+    }
+    without = allocate_research(**common, risk_snapshot=risk_snapshot(assets))
+    with_benchmark = allocate_research(
+        **common, risk_snapshot=risk_snapshot(assets, benchmark=pd.Series([0.9, 0.1], index=assets))
+    )
+    assert with_benchmark.diagnostics["risk_objective"] == "absolute"
+    assert with_benchmark.diagnostics["compatibility_mode"] is True
+    assert with_benchmark.weights.to_numpy() == pytest.approx(without.weights.to_numpy(), abs=1e-7)
+
+
 @pytest.mark.parametrize("budget", [1.0, 0.8])
 def test_partial_cash_and_pool_external_benchmark_survive(budget):
     assets = list("ABCD")

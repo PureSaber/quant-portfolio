@@ -59,7 +59,7 @@ def allocate_research(
     from quant_portfolio.optimization import (
         OptimizationConstraints,
         _research_covariance,
-        _research_expected_returns,
+        ic_vol_expected_returns,
         validate_research_allocation,
     )
 
@@ -166,7 +166,7 @@ def allocate_research(
     diag = {
         "protocol_version": 2 if v2 else 1,
         "compatibility_mode": not v2,
-        "risk_objective": cfg.get("risk_objective", "active" if wb is not None else "absolute"),
+        "risk_objective": cfg.get("risk_objective", "absolute"),
         "risk_usage": METHODS[mode]["risk_usage"],
         "asset_union": assets,
         "invested_budget": invested_limit,
@@ -223,9 +223,10 @@ def allocate_research(
                 raise ValueError(
                     "Black-Litterman requires an explicit views API and full market weights"
                 )
-            covariance = pd.DataFrame(np.diag(risk.diagonal()), index=assets, columns=assets)
-            mu = _research_expected_returns(
-                cfg, scores.reindex(assets, fill_value=0), covariance, market_weights
+            mu = ic_vol_expected_returns(
+                scores.reindex(assets, fill_value=0),
+                pd.Series(np.sqrt(risk.diagonal()), index=assets),
+                float(cfg["information_coefficient"]),
             ).to_numpy()
         else:
             mu = scores.reindex(assets, fill_value=0).to_numpy()

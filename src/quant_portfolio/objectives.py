@@ -1,10 +1,8 @@
 """Independent portfolio objectives that share the long-only feasible set.
 
-Mean-variance stays in ``optimization.py``. The solvers here are projected
-gradient methods on that same set: maximum Sharpe, maximum diversification,
-entropic value at risk, and conditional drawdown at risk. Integer share lots
-are a separate exact local search, not a continuous relaxation that is rounded
-only when an order is created.
+Public objective adapters use the shared CVXPY solver. Ratio feasibility and
+path-risk epigraphs include the real constraints. Integer lots use deterministic
+local repair and carry no global integer optimality claim.
 """
 
 from __future__ import annotations
@@ -23,13 +21,12 @@ def maximum_drawdown(portfolio_returns: np.ndarray) -> float:
 
 
 def conditional_drawdown_at_risk(portfolio_returns: np.ndarray, beta: float) -> float:
-    """Mean drawdown at and above the empirical ``beta`` quantile."""
+    """Empirical RU tail drawdown, including a fractional boundary observation."""
 
     _validate_beta(beta)
     drawdowns = _drawdown_series(portfolio_returns)
-    level = float(np.quantile(drawdowns, float(beta)))
-    tail = drawdowns[drawdowns >= level - 1e-15]
-    return float(tail.mean()) if len(tail) else float(drawdowns.max())
+    level = float(np.quantile(drawdowns, float(beta), method="higher"))
+    return level + float(np.maximum(drawdowns - level, 0).mean()) / (1 - float(beta))
 
 
 def entropic_value_at_risk(losses: np.ndarray, beta: float) -> float:
@@ -110,7 +107,7 @@ def allocate_integer_lots(
     counts = np.maximum(np.floor(point / grid + 1e-10).astype(int), 0)
     counts = _shed_infeasible_lots(counts, grid, objective, is_feasible)
     if not is_feasible(counts * grid):
-        raise ValueError("no feasible integer-lot portfolio exists under the current constraints")
+        raise ValueError("repair_failed: no verified integer-lot target was found")
     return _improve_lots(counts, grid, objective, is_feasible)
 
 
@@ -136,25 +133,10 @@ def optimize_max_sharpe(
     )
     risk_free = _finite("risk_free_rate", risk_free_rate, positive=False)
 
-    def ratio(weights: np.ndarray) -> float:
-        volatility = math.sqrt(max(float(weights @ problem.covariance @ weights), 0.0))
-        if volatility <= 1e-18:
-            raise ValueError("Sharpe ratio is undefined for a zero-volatility portfolio")
-        return (float(problem.expected @ weights) - risk_free) / volatility
-
-    def gradient(weights: np.ndarray) -> np.ndarray:
-        excess = float(problem.expected @ weights) - risk_free
-        variance = max(float(weights @ problem.covariance @ weights), 1e-18)
-        volatility = math.sqrt(variance)
-        risk_gradient = problem.covariance @ weights
-        return problem.expected / volatility - excess * risk_gradient / variance**1.5
-
-    start = _positive_projection(problem.covariance, problem.expected - risk_free)
-    return _maximize_ratio(
+    return _convex_result(
         problem,
-        ratio,
-        gradient,
-        start,
+        "max_sharpe",
+        risk_free_rate=risk_free,
         max_iterations=max_iterations,
         tolerance=tolerance,
     )
@@ -184,26 +166,8 @@ def optimize_max_diversification(
     if np.any(volatility <= 0):
         raise ValueError("maximum diversification requires positive asset variance")
 
-    def ratio(weights: np.ndarray) -> float:
-        denominator = math.sqrt(max(float(weights @ problem.covariance @ weights), 0.0))
-        if denominator <= 1e-18:
-            raise ValueError("diversification ratio is undefined for a zero-volatility portfolio")
-        return float(volatility @ weights) / denominator
-
-    def gradient(weights: np.ndarray) -> np.ndarray:
-        numerator = float(volatility @ weights)
-        variance = max(float(weights @ problem.covariance @ weights), 1e-18)
-        denominator = math.sqrt(variance)
-        return volatility / denominator - numerator * (problem.covariance @ weights) / variance**1.5
-
-    start = _positive_projection(problem.covariance, volatility)
-    return _maximize_ratio(
-        problem,
-        ratio,
-        gradient,
-        start,
-        max_iterations=max_iterations,
-        tolerance=tolerance,
+    return _convex_result(
+        problem, "max_diversification", max_iterations=max_iterations, tolerance=tolerance
     )
 
 
@@ -221,36 +185,18 @@ def optimize_evar(
 ):
     """Maximize expected return minus entropic value at risk."""
 
-    scenarios, expected, problem = _path_problem(
+    scenarios, _expected, problem = _path_problem(
         scenario_returns, expected_returns, current_weights, constraints
     )
     aversion = _finite("risk_aversion", risk_aversion, positive=True)
     _validate_beta(beta)
-    anchor = _drawdown_anchor(scenarios, problem.project, max_drawdown)
-
-    def objective_at(weights: np.ndarray) -> float:
-        losses = -(scenarios @ weights)
-        return float(expected @ weights) - aversion * entropic_value_at_risk(losses, beta)
-
-    def gradient(weights: np.ndarray) -> np.ndarray:
-        losses = -(scenarios @ weights)
-        _value, temperature = _evar_temperature(losses, beta)
-        shifted = losses / temperature
-        shifted -= float(np.max(shifted))
-        probabilities = np.exp(shifted)
-        probabilities /= probabilities.sum()
-        return expected + aversion * (scenarios.T @ probabilities)
-
-    return _maximize_path(
+    return _convex_result(
         problem,
-        scenarios,
-        objective_at,
-        gradient,
-        anchor,
-        max_drawdown,
-        risk_name="evar",
-        risk_value=lambda weights: entropic_value_at_risk(-(scenarios @ weights), beta),
-        aversion=aversion,
+        "evar",
+        scenarios=scenarios,
+        beta=beta,
+        risk_aversion=aversion,
+        max_drawdown=max_drawdown,
         max_iterations=max_iterations,
         tolerance=tolerance,
     )
@@ -274,41 +220,54 @@ def optimize_cdar(
     Scenario order is the path order.
     """
 
-    scenarios, expected, problem = _path_problem(
+    scenarios, _expected, problem = _path_problem(
         scenario_returns, expected_returns, current_weights, constraints
     )
     aversion = _finite("risk_aversion", risk_aversion, positive=True)
     _validate_beta(beta)
-    anchor = _drawdown_anchor(scenarios, problem.project, max_drawdown)
-
-    def objective_at(weights: np.ndarray) -> float:
-        return float(expected @ weights) - aversion * conditional_drawdown_at_risk(
-            scenarios @ weights, beta
-        )
-
-    def gradient(weights: np.ndarray) -> np.ndarray:
-        path = scenarios @ weights
-        drawdowns = _drawdown_series(path)
-        level = float(np.quantile(drawdowns, float(beta)))
-        tail = drawdowns >= level - 1e-15
-        if not tail.any():
-            tail = np.zeros(len(drawdowns), dtype=bool)
-            tail[int(np.argmax(drawdowns))] = True
-        risk_gradient = _tail_drawdown_gradient(path, scenarios, tail)
-        return expected - aversion * risk_gradient
-
-    return _maximize_path(
+    return _convex_result(
         problem,
-        scenarios,
-        objective_at,
-        gradient,
-        anchor,
-        max_drawdown,
-        risk_name="cdar",
-        risk_value=lambda weights: conditional_drawdown_at_risk(scenarios @ weights, beta),
-        aversion=aversion,
+        "cdar",
+        scenarios=scenarios,
+        beta=beta,
+        risk_aversion=aversion,
+        max_drawdown=max_drawdown,
         max_iterations=max_iterations,
         tolerance=tolerance,
+    )
+
+
+def _convex_result(problem, kind, *, tolerance, **kwargs):
+    from quant_portfolio.solver import RiskMatrix, solve_portfolio
+
+    _finite("tolerance", tolerance, positive=True)
+    solved = solve_portfolio(
+        problem.expected,
+        RiskMatrix(covariance=problem.covariance),
+        problem.current,
+        problem.settings,
+        assets=problem.assets,
+        benchmark=problem.benchmark,
+        kind=kind,
+        **kwargs,
+    )
+    w = solved.weights
+    variance = float(w @ problem.covariance @ w)
+    volatility = (
+        float(np.std(kwargs["scenarios"] @ w, ddof=1))
+        if "scenarios" in kwargs
+        else math.sqrt(max(variance, 0))
+    )
+    return _solver_api()[1](
+        weights=pd.Series(w, index=problem.assets, name="weight"),
+        expected_return=float(problem.expected @ w),
+        volatility=volatility,
+        turnover=float(np.abs(w - problem.current).sum()),
+        objective=solved.objective,
+        group_weights=_group_weights(problem.assets, w, problem.settings),
+        converged=True,
+        iterations=solved.diagnostics["iterations"],
+        diagnostics=solved.diagnostics,
     )
 
 
@@ -430,73 +389,6 @@ def _aligned_weights(
     return numeric
 
 
-def _positive_projection(covariance: np.ndarray, direction: np.ndarray) -> np.ndarray:
-    stabilized = covariance + np.eye(covariance.shape[0]) * 1e-10
-    raw = np.linalg.solve(stabilized, np.maximum(direction, 0.0))
-    if not np.isfinite(raw).all() or float(raw.sum()) <= 0:
-        raw = np.maximum(direction, 0.0)
-    if float(raw.sum()) <= 0:
-        raw = np.ones(covariance.shape[0])
-    return raw / raw.sum()
-
-
-def _maximize_ratio(problem, ratio, gradient, start, *, max_iterations: int, tolerance: float):
-    _result_type = _solver_api()[1]
-    _iteration_limit(max_iterations)
-    tolerance = _finite("tolerance", tolerance, positive=True)
-    candidates = (
-        problem.project(np.full(len(problem.assets), 1.0 / len(problem.assets))),
-        problem.project(start),
-    )
-    best = candidates[0]
-    best_value = ratio(best)
-    for candidate in candidates[1:]:
-        value = ratio(candidate)
-        if value > best_value:
-            best = candidate
-            best_value = value
-    weights = best.copy()
-    converged = False
-    iteration = max_iterations
-    for iteration in range(1, max_iterations + 1):
-        step = 0.25
-        current_value = ratio(weights)
-        slope = gradient(weights)
-        candidate = weights
-        for _ in range(20):
-            proposal = problem.project(weights + step * slope)
-            proposal_value = ratio(proposal)
-            if proposal_value >= current_value - 1e-15:
-                candidate = proposal
-                break
-            step *= 0.5
-        else:
-            converged = True
-            break
-        if proposal_value > best_value + tolerance:
-            best = candidate.copy()
-            best_value = proposal_value
-        if float(np.max(np.abs(candidate - weights))) <= tolerance:
-            weights = candidate
-            converged = True
-            break
-        weights = candidate
-    weights = best
-    if not converged and iteration >= max_iterations:
-        raise RuntimeError(f"ratio optimization did not converge after {max_iterations} iterations")
-    variance = max(float(weights @ problem.covariance @ weights), 0.0)
-    return _result_type(
-        weights=pd.Series(weights, index=problem.assets, name="weight"),
-        expected_return=float(problem.expected @ weights),
-        volatility=float(math.sqrt(variance)),
-        turnover=float(np.abs(weights - problem.current).sum()),
-        objective=float(ratio(weights)),
-        group_weights=_group_weights(problem.assets, weights, problem.settings),
-        converged=True,
-        iterations=iteration,
-    )
-
-
 def _path_problem(scenario_returns, expected_returns, current_weights, constraints):
     if getattr(constraints, "max_tracking_error", None) is not None:
         raise ValueError(
@@ -524,89 +416,6 @@ def _path_problem(scenario_returns, expected_returns, current_weights, constrain
         benchmark_weights=None,
     )
     return values, expected, problem
-
-
-def _drawdown_anchor(scenarios, project, limit: float | None):
-    if limit is None:
-        return None
-    if (
-        isinstance(limit, bool)
-        or not isinstance(limit, (int, float))
-        or not np.isfinite(limit)
-        or limit < 0
-    ):
-        raise ValueError("max_drawdown must be finite and non-negative")
-    anchor = minimum_drawdown_weights(scenarios, project)
-    if maximum_drawdown(scenarios @ anchor) > float(limit) + 1e-8:
-        raise ValueError("max_drawdown is infeasible for these scenarios and constraints")
-    return anchor
-
-
-def _maximize_path(
-    problem,
-    scenarios,
-    objective_at,
-    gradient,
-    anchor,
-    max_drawdown_limit,
-    *,
-    risk_name: str,
-    risk_value,
-    aversion: float,
-    max_iterations: int,
-    tolerance: float,
-):
-    del risk_name
-    result_type = _solver_api()[1]
-    _iteration_limit(max_iterations)
-    tolerance = _finite("tolerance", tolerance, positive=True)
-    weights = problem.project(problem.current)
-    best = weights.copy()
-    best_value = -np.inf
-    converged = False
-    iteration = max_iterations
-    quiet = 0
-    for iteration in range(1, max_iterations + 1):
-        slope = gradient(weights)
-        scale = max(float(np.max(np.abs(slope))), 1e-8)
-        step = 0.25 / scale / (1.0 + 0.02 * iteration)
-        candidate = problem.project(weights + step * slope)
-        if anchor is not None:
-            candidate = enforce_drawdown_limit(
-                candidate, scenarios, float(max_drawdown_limit), anchor
-            )
-        value = objective_at(candidate)
-        if value > best_value + tolerance:
-            best = candidate.copy()
-            best_value = value
-            quiet = 0
-        else:
-            quiet += 1
-        if float(np.max(np.abs(candidate - weights))) <= tolerance or quiet >= 40:
-            weights = best
-            converged = True
-            break
-        weights = candidate
-    if not converged:
-        raise RuntimeError(f"path optimization did not converge after {max_iterations} iterations")
-    weights = best
-    if (
-        anchor is not None
-        and maximum_drawdown(scenarios @ weights) > float(max_drawdown_limit) + 1e-8
-    ):
-        raise RuntimeError("optimizer produced a portfolio outside the drawdown limit")
-    risk = float(risk_value(weights))
-    expected = float(problem.expected @ weights)
-    return result_type(
-        weights=pd.Series(weights, index=problem.assets, name="weight"),
-        expected_return=expected,
-        volatility=float(np.std(scenarios @ weights, ddof=1)),
-        turnover=float(np.abs(weights - problem.current).sum()),
-        objective=expected - aversion * risk,
-        group_weights=_group_weights(problem.assets, weights, problem.settings),
-        converged=True,
-        iterations=iteration,
-    )
 
 
 def _shed_infeasible_lots(counts, steps, objective, is_feasible):

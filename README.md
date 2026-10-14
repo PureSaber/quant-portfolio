@@ -173,9 +173,82 @@ it emits QExec `OrderIntent` suggestions and never alters a ledger, positions, o
 The module has no live-order, network, or credential capability. Missing, future, duplicate, or
 non-finite PIT inputs fail closed.
 
-## M6 governance and reproducibility
+## Optimizer protocol v2 and migration
 
-Version `0.4.2` consumes only published annotated internal tags:
+`allocate_research` returns an `AllocationResult` with continuous account weights,
+independent constraint residuals, forecast/risk units, exact solver versions and
+backend attempts. `research_allocation_weights` remains a Series convenience API.
+New configurations explicitly specify `protocol_version: 2`, `mode`,
+`risk_objective: absolute|active`, `forecast_horizon_sessions` and
+`expected_return_model: ic_vol|provided|none`. For example:
+
+```yaml
+allocation:
+  protocol_version: 2
+  mode: cost_aware
+  risk_objective: absolute
+  forecast_horizon_sessions: 5
+  expected_return_model: ic_vol
+  lookback: 120
+  min_observations: 20
+  ic_lookback: 120
+  ic_min_periods: 20
+  max_turnover: 2.0
+  timeout_seconds: 30
+```
+
+The expected-return and risk penalty use the declared decision horizon. Costs
+are charged once per rebalance. Covariance inputs and tracking-error limits are
+annualized. IC uses only labels available and matured by the decision, selects
+non-overlapping periods and fails on insufficient history. `provided` forecasts
+must cover every candidate. Black–Litterman remains an explicit lower-level
+views API; v2 does not infer missing views or market weights.
+
+Mean–variance maximizes forecast return minus half the risk-aversion coefficient
+times variance and trading costs. `active` centers risk on the full benchmark
+and is currently supported by `cost_aware`. Target methods minimize squared
+distance to equal, inverse-volatility, risk-parity or HRP targets plus declared
+cost penalties; risk-contribution changes are reported. Ratio methods maximize
+the positive excess-return/volatility or weighted-volatility/portfolio-volatility
+ratio; transaction costs are reported and checked during executable repair,
+but are not subtracted from these ratio definitions. CVaR/CDaR use exact empirical
+tail-risk auxiliary variables; EVaR uses exponential cones. Their objectives are
+forecast return minus risk aversion times scenario risk and trading costs.
+CDaR uses cumulative simple-return paths, not compounded wealth drawdowns.
+
+All constraints enter the same problem, including trades out of the candidate
+pool. Cash is retained in whole-account weights; benchmark weights are never
+renormalized to the candidate pool or invested sleeve. `RiskSnapshot` carries
+X/F/D or a dense covariance, availability time, horizon, annualization and model
+identity. The factor path never constructs an asset-by-asset covariance.
+HRP/risk-parity target construction currently requires explicit dense candidate
+covariance; research configuration rejects their combination with factor-only
+Barra inputs. The default exposure definitions are unchanged.
+
+CVXPY 1.7.5, OSQP 1.0.5 and Clarabel 0.11.1 are pinned. OSQP may retry the same
+problem in Clarabel; an inaccurate result is never directly published. Failures
+distinguish `infeasible`, `not_converged`, `numerical_failure`, `timeout`,
+`no_positive_excess_return`, `undefined_ratio` and `repair_failed`. The legacy
+mean–variance algorithm is available only through `solver_backend="legacy"`
+for comparison; it is never an automatic fallback. Integer targets use exact
+execution-layer cash quotes and deterministic local repair. They are verified
+feasible targets, with no claim of a global integer optimum.
+
+Configurations without a protocol version retain their score interpretation
+and are marked as compatibility mode. Solver correctness fixes can change their
+weights. Exact historical reproduction requires the original frozen environment;
+new runs receive new identities and must not overwrite previous evidence.
+
+Run `scripts/benchmark_optimizer.py --help` for the seeded 200/1,000/6,000 asset
+factor benchmark. The regression suite contains the bounded-simplex KKT failure,
+three six-asset projection cases, joint-turnover maximum Sharpe, pool-external
+benchmark/cash tests and 200 independent SLSQP objective comparisons.
+
+## M6 governance and reproducibility (historical baseline)
+
+The original `0.4.2` governance baseline consumed these annotated internal tags.
+The optimizer upgrade pins its reviewed protocol and execution revisions in
+`pyproject.toml` and `requirements.lock` instead:
 
 - `quant-data-kit v0.8.1` (`b5621379e1a15562371be31c03f354a6acf512e4`)
 - `quant-execution v0.5.1` (`99ab9b1445d72164fa4e8c6d1ebde859b80dba1f`)

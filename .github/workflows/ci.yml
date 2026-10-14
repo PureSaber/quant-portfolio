@@ -11,9 +11,10 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
+        os: [ubuntu-24.04, windows-2025]
         python-version: ["3.10", "3.11", "3.12"]
 
     steps:
@@ -30,7 +31,7 @@ jobs:
         run: |
           python -m pip install --no-deps --requirement requirements.lock
           python -m pip check
-          python -m pip install --no-deps --no-build-isolation --editable .
+          python -m pip install --no-deps --no-build-isolation .
           python -m pip check
 
       - name: Ruff check
@@ -66,6 +67,7 @@ jobs:
           print(f"cross_asset.py pure branch coverage: {covered}/{total} ({covered / total:.2%})")
 
       - name: Run deterministic synthetic demo
+        shell: bash
         run: |
           python scripts/run_synthetic_demo.py --out "$RUNNER_TEMP/synthetic-demo"
           grep -q "SYNTHETIC DEMONSTRATION" "$RUNNER_TEMP/synthetic-demo/metrics.json"

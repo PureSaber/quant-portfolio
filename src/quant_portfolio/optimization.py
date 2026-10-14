@@ -24,14 +24,29 @@ from quant_portfolio.methods import (
 )
 from quant_portfolio.objectives import (
     allocate_integer_lots,
-    enforce_drawdown_limit,
-    maximum_drawdown,
-    minimum_drawdown_weights,
     optimize_cdar,
     optimize_evar,
     optimize_max_diversification,
     optimize_max_sharpe,
 )
+
+__all__ = [
+    "MultiPeriodResult",
+    "OptimizationConstraints",
+    "OptimizationResult",
+    "estimate_capacity",
+    "estimate_covariance",
+    "optimize_cdar",
+    "optimize_cvar",
+    "optimize_evar",
+    "optimize_max_diversification",
+    "optimize_max_sharpe",
+    "optimize_mean_variance",
+    "optimize_multiperiod",
+    "research_allocation_weights",
+    "square_root_impact_cost",
+    "validate_research_allocation",
+]
 
 
 @dataclass(frozen=True)
@@ -54,6 +69,7 @@ class OptimizationResult:
     group_weights: dict[str, float]
     converged: bool
     iterations: int
+    diagnostics: dict[str, object] = field(default_factory=dict)
 
 
 _RESEARCH_ALLOCATION_FIELDS = {
@@ -108,148 +124,9 @@ _COVARIANCE_ESTIMATORS = {
 
 
 def validate_research_allocation(value: Mapping[str, object]) -> dict[str, object]:
-    """Validate and normalize the closed research-allocation recipe fragment."""
+    from quant_data_kit.allocation_protocol import validate_research_allocation as validate
 
-    if not isinstance(value, Mapping):
-        raise TypeError("allocation must be a mapping")
-    unknown = set(value) - _RESEARCH_ALLOCATION_FIELDS
-    if unknown:
-        raise ValueError(f"allocation contains unknown fields: {sorted(unknown)}")
-    mode = value.get("mode")
-    if mode not in _ALLOCATION_MODES:
-        raise ValueError(
-            "allocation.mode must be equal, inverse_vol, cost_aware, risk_parity, hrp or cvar, "
-            "max_sharpe, max_diversification, evar or cdar"
-        )
-
-    def integer(name: str, default: int) -> int:
-        result = value.get(name, default)
-        if isinstance(result, bool) or not isinstance(result, int):
-            raise TypeError(f"allocation.{name} must be an integer")
-        return result
-
-    def number(name: str, default: float) -> float:
-        result = value.get(name, default)
-        if isinstance(result, bool) or not isinstance(result, (int, float)):
-            raise TypeError(f"allocation.{name} must be numeric")
-        result = float(result)
-        if not np.isfinite(result):
-            raise ValueError(f"allocation.{name} must be finite")
-        return result
-
-    lookback = integer("lookback", 20)
-    min_observations = integer("min_observations", 10)
-    shrinkage = number("covariance_shrinkage", 0.2)
-    risk_aversion = number("risk_aversion", 5.0)
-    turnover_penalty = number("turnover_penalty", 0.0)
-    max_turnover = number("max_turnover", 1.0)
-    if lookback < 2:
-        raise ValueError("allocation.lookback must be at least 2")
-    if not 2 <= min_observations <= lookback:
-        raise ValueError("allocation.min_observations must be between 2 and lookback")
-    if not 0 <= shrinkage <= 1:
-        raise ValueError("allocation.covariance_shrinkage must be in [0, 1]")
-    if risk_aversion <= 0:
-        raise ValueError("allocation.risk_aversion must be positive")
-    if turnover_penalty < 0:
-        raise ValueError("allocation.turnover_penalty must be non-negative")
-    if not 0 <= max_turnover <= 2:
-        raise ValueError("allocation.max_turnover must be in [0, 2]")
-    estimator = value.get("covariance_estimator", "diagonal")
-    if estimator not in _COVARIANCE_ESTIMATORS:
-        raise ValueError(
-            "allocation.covariance_estimator must be diagonal, ledoit_wolf, factor, ewma, "
-            "constant_correlation, oas or random_matrix"
-        )
-    if mode not in _COVARIANCE_MODES and estimator != "diagonal":
-        raise ValueError(
-            "allocation.covariance_estimator is only used by cost_aware, risk_parity, hrp, "
-            "max_sharpe and max_diversification"
-        )
-    if "ewma_decay" in value and estimator != "ewma":
-        raise ValueError("allocation.ewma_decay is only supported for the ewma estimator")
-    decay = number("ewma_decay", 0.94)
-    if estimator == "ewma" and not 0 < decay < 1:
-        raise ValueError("allocation.ewma_decay must be in (0, 1)")
-    if "risk_free_rate" in value and mode != "max_sharpe":
-        raise ValueError("allocation.risk_free_rate is only supported for max_sharpe")
-    risk_free_rate = number("risk_free_rate", 0.0)
-    if "max_tracking_error" in value and mode != "cost_aware":
-        raise ValueError("allocation.max_tracking_error is only supported for cost_aware")
-    raw_tracking_error = value.get("max_tracking_error")
-    if raw_tracking_error is None:
-        max_tracking_error = None
-    else:
-        max_tracking_error = number("max_tracking_error", 0.0)
-        if max_tracking_error < 0:
-            raise ValueError("allocation.max_tracking_error must be non-negative")
-    if "evar_beta" in value and mode != "evar":
-        raise ValueError("allocation.evar_beta is only supported for evar")
-    if "cdar_beta" in value and mode != "cdar":
-        raise ValueError("allocation.cdar_beta is only supported for cdar")
-    expected_return_model = value.get("expected_return_model", "score")
-    if expected_return_model not in {"score", "ic_vol", "black_litterman"}:
-        raise ValueError(
-            "allocation.expected_return_model must be score, ic_vol or black_litterman"
-        )
-    if mode != "cost_aware" and (
-        expected_return_model != "score"
-        or "information_coefficient" in value
-        or "black_litterman_tau" in value
-    ):
-        raise ValueError("expected-return fields are only supported for cost_aware")
-    information_coefficient = number("information_coefficient", 0.05)
-    tau = number("black_litterman_tau", 0.05)
-    if (
-        expected_return_model in {"ic_vol", "black_litterman"}
-        and not 0 < information_coefficient <= 1
-    ):
-        raise ValueError("allocation.information_coefficient must be in (0, 1]")
-    if expected_return_model == "black_litterman" and not 0 < tau <= 1:
-        raise ValueError("allocation.black_litterman_tau must be in (0, 1]")
-    if mode != "cvar" and "cvar_beta" in value:
-        raise ValueError("allocation.cvar_beta is only supported for cvar")
-    cvar_beta = number("cvar_beta", 0.95)
-    if mode == "cvar" and not 0 < cvar_beta < 1:
-        raise ValueError("allocation.cvar_beta must be in (0, 1)")
-    evar_beta = number("evar_beta", 0.95)
-    cdar_beta = number("cdar_beta", 0.95)
-    if mode == "evar" and not 0 < evar_beta < 1:
-        raise ValueError("allocation.evar_beta must be in (0, 1)")
-    if mode == "cdar" and not 0 < cdar_beta < 1:
-        raise ValueError("allocation.cdar_beta must be in (0, 1)")
-    factor_bound_reference = value.get("factor_bound_reference", "absolute")
-    if factor_bound_reference not in {"absolute", "active"}:
-        raise ValueError("allocation.factor_bound_reference must be absolute or active")
-    if mode != "cost_aware" and factor_bound_reference != "absolute":
-        raise ValueError("allocation.factor_bound_reference is only supported for cost_aware")
-    normalized = {
-        "mode": mode,
-        "lookback": lookback,
-        "min_observations": min_observations,
-        "covariance_shrinkage": shrinkage,
-        "covariance_estimator": estimator,
-        "risk_aversion": risk_aversion,
-        "turnover_penalty": turnover_penalty,
-        "max_turnover": max_turnover,
-        "expected_return_model": expected_return_model,
-        "factor_bound_reference": factor_bound_reference,
-    }
-    # Persist only applicable optional fields. The execution adapter validates this
-    # normalized fragment again after serializing its plan.
-    if estimator == "ewma":
-        normalized["ewma_decay"] = decay
-    if mode == "cost_aware":
-        normalized.update(
-            information_coefficient=information_coefficient,
-            black_litterman_tau=tau,
-            max_tracking_error=max_tracking_error,
-        )
-    if mode == "max_sharpe":
-        normalized["risk_free_rate"] = risk_free_rate
-    if mode in _PATH_MODES:
-        normalized[f"{mode}_beta"] = {"cvar": cvar_beta, "evar": evar_beta, "cdar": cdar_beta}[mode]
-    return normalized
+    return validate(value)
 
 
 def _validated_covariance(covariance: pd.DataFrame, assets: list[str]) -> np.ndarray:
@@ -364,6 +241,15 @@ def research_allocation_weights(
     impact_volatility: pd.Series | None = None,
     impact_coefficient: float = 0.0,
     portfolio_nav: float | None = None,
+    risk_snapshot=None,
+    decision_at=None,
+    expected_returns=None,
+    ic_labels=None,
+    lower_bounds=None,
+    upper_bounds=None,
+    buy_costs=None,
+    sell_costs=None,
+    max_tracking_error_override=None,
 ) -> pd.Series:
     """Build long-only research weights with one explicit, closed allocation policy.
 
@@ -381,6 +267,45 @@ def research_allocation_weights(
     liquidation of current assets absent from ``scores``.
     """
 
+    if (
+        config.get("protocol_version") == 2
+        or risk_snapshot is not None
+        or config.get("mode") in {"max_sharpe", "max_diversification", "cvar", "evar", "cdar"}
+        or lower_bounds is not None
+        or upper_bounds is not None
+    ):
+        from quant_portfolio.allocation_v2 import allocate_research
+
+        return allocate_research(
+            scores,
+            trailing_returns,
+            current_weights,
+            linear_costs,
+            invested_limit=invested_limit,
+            max_weight=max_weight,
+            config=config,
+            factor_exposures=factor_exposures,
+            factor_bounds=factor_bounds,
+            covariance_override=covariance_override,
+            benchmark_weights=benchmark_weights,
+            factor_loadings=factor_loadings,
+            factor_covariance=factor_covariance,
+            specific_variance=specific_variance,
+            risk_snapshot=risk_snapshot,
+            decision_at=decision_at,
+            expected_returns=expected_returns,
+            ic_labels=ic_labels,
+            lower_bounds=lower_bounds,
+            upper_bounds=upper_bounds,
+            buy_costs=buy_costs,
+            sell_costs=sell_costs,
+            impact_adv=impact_adv,
+            impact_volatility=impact_volatility,
+            impact_coefficient=impact_coefficient,
+            portfolio_nav=portfolio_nav,
+            market_weights=market_weights,
+            max_tracking_error_override=max_tracking_error_override,
+        ).weights
     settings = validate_research_allocation(config)
     if not isinstance(scores, pd.Series) or scores.empty or not scores.index.is_unique:
         raise ValueError("scores must be a non-empty Series with unique assets")
@@ -440,30 +365,22 @@ def research_allocation_weights(
         exposures, bounds = _validated_factor_constraints(assets, factor_exposures, factor_bounds)
         desired = np.repeat(total / len(assets), len(assets))
         if exposures is not None:
-            # The joint projector uses a unit-budget sleeve. All absolute
-            # portfolio limits, including liquidation outside the sleeve, scale
-            # by the same invested fraction; cash has zero factor exposure.
-            constraints = _validated_constraints(
-                OptimizationConstraints(
-                    max_weight=min(1.0, cap / total),
-                    max_turnover=turnover_limit / total,
-                ),
-                assets,
+            from quant_portfolio.solver import solve_portfolio
+
+            solved = solve_portfolio(
+                np.zeros(len(assets)),
+                None,
+                current.to_numpy(dtype=float),
+                OptimizationConstraints(max_weight=cap, max_turnover=turnover_limit),
+                assets=assets,
+                budget=total,
+                kind="target",
+                target=desired,
+                factor_exposures=exposures,
+                factor_bounds=bounds,
+                turnover_offset=outside_turnover,
             )
-            weights = _project_joint_feasible_set(
-                desired / total,
-                assets,
-                current.to_numpy(dtype=float) / total,
-                outside_turnover / total,
-                constraints,
-                exposures,
-                {
-                    factor: (lower / total, upper / total)
-                    for factor, (lower, upper) in bounds.items()
-                },
-                tolerance=1e-10,
-            )
-            return pd.Series(weights * total, index=assets, name="weight")
+            return pd.Series(solved.weights, index=assets, name="weight")
         weights = _constrain_turnover(
             desired,
             current.to_numpy(dtype=float),
@@ -515,73 +432,22 @@ def research_allocation_weights(
         )
         return pd.Series(weights, index=assets, name="weight")
 
-    if mode in (_COVARIANCE_MODES - {"cost_aware"}) | _PATH_MODES:
-        sleeve_cap = min(1.0, cap / total)
-        if mode in _PATH_MODES:
-            assert window is not None
-            path_constraints = OptimizationConstraints(max_weight=sleeve_cap, max_turnover=2.0)
-            if mode == "cvar":
-                solved = optimize_cvar(
-                    window,
-                    numeric_scores,
-                    beta=float(settings["cvar_beta"]),
-                    risk_aversion=float(settings["risk_aversion"]),
-                    constraints=path_constraints,
-                )
-            elif mode == "evar":
-                solved = optimize_evar(
-                    window,
-                    numeric_scores,
-                    beta=float(settings["evar_beta"]),
-                    risk_aversion=float(settings["risk_aversion"]),
-                    constraints=path_constraints,
-                )
-            else:
-                solved = optimize_cdar(
-                    window,
-                    numeric_scores,
-                    beta=float(settings["cdar_beta"]),
-                    risk_aversion=float(settings["risk_aversion"]),
-                    constraints=path_constraints,
-                )
-            desired = solved.weights.to_numpy(dtype=float) * total
-        elif mode in {"max_sharpe", "max_diversification"}:
-            covariance = _research_covariance(
-                settings,
-                window,
-                covariance_override,
-                assets,
-                factor_loadings,
-                factor_covariance,
-                specific_variance,
-            )
-            ratio_constraints = OptimizationConstraints(max_weight=sleeve_cap, max_turnover=2.0)
-            if mode == "max_sharpe":
-                solved = optimize_max_sharpe(
-                    numeric_scores,
-                    covariance,
-                    risk_free_rate=float(settings["risk_free_rate"]),
-                    constraints=ratio_constraints,
-                )
-            else:
-                solved = optimize_max_diversification(covariance, constraints=ratio_constraints)
-            desired = solved.weights.to_numpy(dtype=float) * total
-        else:
-            covariance = _research_covariance(
-                settings,
-                window,
-                covariance_override,
-                assets,
-                factor_loadings,
-                factor_covariance,
-                specific_variance,
-            )
-            raw = (
-                equal_risk_contribution_weights(covariance)
-                if mode == "risk_parity"
-                else hierarchical_risk_parity_weights(covariance)
-            )
-            desired = raw.reindex(assets).to_numpy(dtype=float) * total
+    if mode in {"risk_parity", "hrp"}:
+        covariance = _research_covariance(
+            settings,
+            window,
+            covariance_override,
+            assets,
+            factor_loadings,
+            factor_covariance,
+            specific_variance,
+        )
+        raw = (
+            equal_risk_contribution_weights(covariance)
+            if mode == "risk_parity"
+            else hierarchical_risk_parity_weights(covariance)
+        )
+        desired = raw.reindex(assets).to_numpy(dtype=float) * total
         desired = _project_box_simplex(desired, 0.0, cap, total=total)
         weights = _constrain_turnover(
             desired,
@@ -781,25 +647,6 @@ def _project_box_simplex(
         return np.repeat(lower, count)
     if abs(upper * count - total) <= 1e-14:
         return np.repeat(upper, count)
-    projected = np.zeros(count, dtype=float)
-    free = np.ones(count, dtype=bool)
-    for _ in range(count + 1):
-        remaining = total - float(projected[~free].sum())
-        shift = (float(values[free].sum()) - remaining) / int(free.sum())
-        candidates = values[free] - shift
-        below = candidates < lower
-        above = candidates > upper
-        if not below.any() and not above.any():
-            projected[free] = candidates
-            return projected
-        free_indices = np.flatnonzero(free)
-        projected[free_indices[below]] = lower
-        projected[free_indices[above]] = upper
-        free[free_indices[below | above]] = False
-        if not free.any():
-            if abs(float(projected.sum()) - total) <= 1e-12:
-                return projected
-            break
     low = float(np.min(values - upper))
     high = float(np.max(values - lower))
     for _ in range(80):
@@ -826,28 +673,27 @@ def _constrain_turnover(
 
     if max_turnover < 0 or turnover_offset < 0:
         raise ValueError("turnover limits and offsets must be non-negative")
-    anchor = _project_box_simplex(current, lower, upper, total=total)
+    from quant_portfolio.solver import OptimizationError, solve_portfolio
 
-    def turnover(target: np.ndarray) -> float:
-        return float(np.abs(target - current).sum()) + turnover_offset
-
-    minimum = turnover(anchor)
-    if minimum > max_turnover + 1e-10:
-        raise ValueError(
-            "allocation.max_turnover is infeasible for the current portfolio and target sleeve"
-        )
-    if turnover(desired) <= max_turnover + 1e-12:
-        return desired.copy()
-    low = 0.0
-    high = 1.0
-    for _ in range(100):
-        midpoint = (low + high) / 2
-        candidate = anchor + midpoint * (desired - anchor)
-        if turnover(candidate) <= max_turnover:
-            low = midpoint
-        else:
-            high = midpoint
-    return anchor + low * (desired - anchor)
+    try:
+        return solve_portfolio(
+            np.zeros(len(desired)),
+            None,
+            current,
+            OptimizationConstraints(min_weight=lower, max_weight=upper, max_turnover=max_turnover),
+            budget=total,
+            kind="target",
+            target=desired,
+            turnover_offset=turnover_offset,
+        ).weights
+    except OptimizationError as exc:
+        if exc.status == "infeasible":
+            raise OptimizationError(
+                "infeasible",
+                "allocation.max_turnover is infeasible for the current portfolio and budget",
+                exc.diagnostics,
+            ) from exc
+        raise
 
 
 def _project_l1_ball(values: np.ndarray, center: np.ndarray, radius: float) -> np.ndarray:
@@ -1333,7 +1179,9 @@ def _project_joint_feasible_set(
     detail = ", ".join(f"{name}={value:.6g}" for name, value in violations.items())
     if not detail:
         detail = "projection did not converge"
-    raise ValueError(f"joint constraints are infeasible: {detail}")
+    from quant_portfolio.solver import OptimizationError
+
+    raise OptimizationError("not_converged", f"joint projection did not converge: {detail}")
 
 
 def optimize_mean_variance(
@@ -1357,8 +1205,10 @@ def optimize_mean_variance(
     impact_coefficient: float = 0.0,
     portfolio_nav: float | None = None,
     weight_steps: pd.Series | None = None,
+    solver_backend: str = "cvxpy",
+    timeout_seconds: float = 30.0,
 ) -> OptimizationResult:
-    """Proximal-gradient long-only optimizer.
+    """Joint convex long-only optimizer with an explicit legacy reference backend.
 
     Maximizes expected return minus quadratic risk, linear trading costs and an
     additional turnover penalty. Pass ``benchmark_weights`` to charge active
@@ -1368,8 +1218,7 @@ def optimize_mean_variance(
     are all supplied. ``constraints.max_tracking_error`` is a hard cap on
     active volatility and requires ``benchmark_weights``. ``weight_steps``
     snaps the continuous solution to integer lots and may leave residual cash.
-    The non-smooth trading objective and all constraints share one Dykstra
-    proximal step on every iteration.
+    All constraints and trading costs enter the same convex problem.
     """
     if not isinstance(expected_returns, pd.Series):
         raise TypeError("expected_returns must be a pandas Series")
@@ -1494,45 +1343,46 @@ def optimize_mean_variance(
         if not np.isfinite(costs).all() or (costs < 0).any():
             raise ValueError("linear_costs must be finite and non-negative for every asset")
     mu = numeric_expected.to_numpy(dtype=float)
-    largest_eigenvalue = max(float(np.linalg.eigvalsh(cov).max()), 1e-12)
-    impact_lipschitz = 0.0
-    if impact is not None:
-        adv, vol, coefficient, nav = impact
-        curvature = float(np.max(coefficient * vol * np.sqrt(nav / adv)) * 1.5 * (1e-8**-0.25))
-        impact_lipschitz = curvature
-    step = 0.5 / (risk_aversion * largest_eigenvalue + impact_lipschitz + 1.0)
-    projection_tolerance = max(min(float(tolerance), 1e-10), 1e-12)
+    from quant_portfolio.solver import RiskMatrix, solve_portfolio
+
+    diagnostics = {}
     tracking_covariance = cov if settings.max_tracking_error is not None else None
     tracking_benchmark = benchmark if settings.max_tracking_error is not None else None
-    weights = _project_joint_feasible_set(
-        current,
-        assets,
-        current,
-        float(turnover_offset),
-        settings,
-        validated_exposures,
-        validated_factor_bounds,
-        tolerance=projection_tolerance,
-        covariance=tracking_covariance,
-        benchmark=tracking_benchmark,
-        max_tracking_error=settings.max_tracking_error,
-    )
-    converged = False
-
-    for iteration in range(1, max_iterations + 1):
-        impact_gradient = np.zeros(len(assets))
+    if solver_backend == "cvxpy":
+        solved = solve_portfolio(
+            mu,
+            RiskMatrix(covariance=cov),
+            current,
+            settings,
+            assets=assets,
+            factor_exposures=validated_exposures,
+            factor_bounds=validated_factor_bounds,
+            benchmark=benchmark if active_risk else None,
+            active_risk=active_risk,
+            linear_costs=costs,
+            turnover_penalty=turnover_penalty,
+            turnover_offset=turnover_offset,
+            risk_aversion=risk_aversion,
+            impact=impact,
+            timeout_seconds=timeout_seconds,
+            max_iterations=max_iterations,
+        )
+        weights = solved.weights
+        diagnostics = solved.diagnostics
+        converged, iteration = True, diagnostics["iterations"]
+    elif solver_backend == "legacy":
+        largest_eigenvalue = max(float(np.linalg.eigvalsh(cov).max()), 1e-12)
+        impact_lipschitz = 0.0
         if impact is not None:
             adv, vol, coefficient, nav = impact
-            _, impact_gradient = square_root_impact_penalty(
-                weights - current,
-                adv,
-                vol,
-                impact_coefficient=coefficient,
-                portfolio_nav=nav,
-            )
-        gradient = mu - risk_aversion * (cov @ (weights - risk_center)) - impact_gradient
-        candidate = _project_joint_feasible_set(
-            weights + step * gradient,
+            curvature = float(np.max(coefficient * vol * np.sqrt(nav / adv)) * 1.5 * (1e-8**-0.25))
+            impact_lipschitz = curvature
+        step = 0.5 / (risk_aversion * largest_eigenvalue + impact_lipschitz + 1.0)
+        projection_tolerance = max(min(float(tolerance), 1e-10), 1e-12)
+        tracking_covariance = cov if settings.max_tracking_error is not None else None
+        tracking_benchmark = benchmark if settings.max_tracking_error is not None else None
+        weights = _project_joint_feasible_set(
+            current,
             assets,
             current,
             float(turnover_offset),
@@ -1540,19 +1390,49 @@ def optimize_mean_variance(
             validated_exposures,
             validated_factor_bounds,
             tolerance=projection_tolerance,
-            trade_penalties=costs + turnover_penalty,
-            penalty_scale=step,
             covariance=tracking_covariance,
             benchmark=tracking_benchmark,
             max_tracking_error=settings.max_tracking_error,
         )
-        if float(np.max(np.abs(candidate - weights))) <= tolerance:
+        converged = False
+
+        for iteration in range(1, max_iterations + 1):
+            impact_gradient = np.zeros(len(assets))
+            if impact is not None:
+                adv, vol, coefficient, nav = impact
+                _, impact_gradient = square_root_impact_penalty(
+                    weights - current,
+                    adv,
+                    vol,
+                    impact_coefficient=coefficient,
+                    portfolio_nav=nav,
+                )
+            gradient = mu - risk_aversion * (cov @ (weights - risk_center)) - impact_gradient
+            candidate = _project_joint_feasible_set(
+                weights + step * gradient,
+                assets,
+                current,
+                float(turnover_offset),
+                settings,
+                validated_exposures,
+                validated_factor_bounds,
+                tolerance=projection_tolerance,
+                trade_penalties=costs + turnover_penalty,
+                penalty_scale=step,
+                covariance=tracking_covariance,
+                benchmark=tracking_benchmark,
+                max_tracking_error=settings.max_tracking_error,
+            )
+            if float(np.max(np.abs(candidate - weights))) <= tolerance:
+                weights = candidate
+                converged = True
+                break
             weights = candidate
-            converged = True
-            break
-        weights = candidate
+        else:
+            iteration = max_iterations
+
     else:
-        iteration = max_iterations
+        raise ValueError("solver_backend must be cvxpy or legacy")
 
     violations = _constraint_violations(
         weights,
@@ -1562,7 +1442,7 @@ def optimize_mean_variance(
         settings,
         validated_exposures,
         validated_factor_bounds,
-        tolerance=max(float(tolerance) * 10, 1e-9),
+        tolerance=max(float(tolerance) * 10, 1e-7),
         covariance=tracking_covariance,
         benchmark=tracking_benchmark,
         max_tracking_error=settings.max_tracking_error,
@@ -1625,6 +1505,7 @@ def optimize_mean_variance(
         group_weights=group_weights,
         converged=converged,
         iterations=iteration,
+        diagnostics=diagnostics,
     )
 
 
@@ -1801,117 +1682,32 @@ def optimize_cvar(
         if numeric_current.isna().any() or (numeric_current < 0).any():
             raise ValueError("current_weights must be finite and non-negative")
         current = numeric_current.to_numpy(dtype=float)
-    scenario_values = scenarios.to_numpy(dtype=float)
-    drawdown_anchor = None
-    if max_drawdown is not None:
-        if (
-            isinstance(max_drawdown, bool)
-            or not isinstance(max_drawdown, (int, float))
-            or not np.isfinite(max_drawdown)
-            or max_drawdown < 0
-        ):
-            raise ValueError("max_drawdown must be finite and non-negative")
+    from quant_portfolio.solver import solve_portfolio
 
-        def project_drawdown(point: np.ndarray) -> np.ndarray:
-            return _project_joint_feasible_set(
-                point,
-                assets,
-                current,
-                0.0,
-                settings,
-                None,
-                {},
-                tolerance=1e-10,
-            )
-
-        drawdown_anchor = minimum_drawdown_weights(scenario_values, project_drawdown)
-        if maximum_drawdown(scenario_values @ drawdown_anchor) > float(max_drawdown) + 1e-8:
-            raise ValueError("max_drawdown is infeasible for these scenarios and constraints")
-    mu_values = mu.to_numpy(dtype=float)
-    scale = max(float(np.max(np.abs(scenario_values))), 1e-6)
-    base_step = 0.25 / (float(risk_aversion) * scale + 1.0)
-    weights = _project_joint_feasible_set(
-        current,
-        assets,
-        current,
-        0.0,
-        settings,
+    solved = solve_portfolio(
+        mu.to_numpy(dtype=float),
         None,
-        {},
-        tolerance=1e-10,
+        current,
+        settings,
+        assets=assets,
+        kind="cvar",
+        scenarios=scenarios.to_numpy(dtype=float),
+        beta=beta,
+        risk_aversion=risk_aversion,
+        max_drawdown=max_drawdown,
+        max_iterations=max_iterations,
     )
-    converged = False
-    iteration = max_iterations
-    best_weights = weights.copy()
-    best_objective = -np.inf
-    quiet = 0
-
-    def objective_at(point: np.ndarray) -> float:
-        point_losses = -(scenario_values @ point)
-        point_var = float(np.quantile(point_losses, float(beta)))
-        tail_loss = point_losses[point_losses >= point_var - 1e-15]
-        cvar_value = float(tail_loss.mean()) if len(tail_loss) else float(point_losses.max())
-        return float(mu_values @ point) - float(risk_aversion) * cvar_value
-
-    for iteration in range(1, max_iterations + 1):
-        losses = -(scenario_values @ weights)
-        var = float(np.quantile(losses, float(beta)))
-        tail = losses >= var - 1e-15
-        if not tail.any():
-            tail = np.zeros(len(losses), dtype=bool)
-            tail[int(np.argmax(losses))] = True
-        cvar_gradient = -scenario_values[tail].mean(axis=0)
-        gradient = mu_values - float(risk_aversion) * cvar_gradient
-        step = base_step / (1.0 + 0.05 * iteration)
-        candidate = _project_joint_feasible_set(
-            weights + step * gradient,
-            assets,
-            current,
-            0.0,
-            settings,
-            None,
-            {},
-            tolerance=1e-10,
-        )
-        if drawdown_anchor is not None:
-            candidate = enforce_drawdown_limit(
-                candidate, scenario_values, float(max_drawdown), drawdown_anchor
-            )
-        candidate_objective = objective_at(candidate)
-        if candidate_objective > best_objective + tolerance:
-            best_objective = candidate_objective
-            best_weights = candidate.copy()
-            quiet = 0
-        else:
-            quiet += 1
-        if float(np.max(np.abs(candidate - weights))) <= tolerance or quiet >= 30 or step < 1e-4:
-            weights = best_weights
-            converged = True
-            break
-        weights = candidate
-    if not converged:
-        raise RuntimeError(f"CVaR optimization did not converge after {max_iterations} iterations")
-    if (
-        drawdown_anchor is not None
-        and maximum_drawdown(scenario_values @ weights) > float(max_drawdown) + 1e-8
-    ):
-        raise RuntimeError("optimizer produced a portfolio outside the drawdown limit")
-    portfolio_returns = scenario_values @ weights
-    volatility = float(np.std(portfolio_returns, ddof=1))
-    expected = float(mu_values @ weights)
-    losses = -(scenario_values @ weights)
-    var = float(np.quantile(losses, float(beta)))
-    tail_losses = losses[losses >= var - 1e-15]
-    cvar = float(tail_losses.mean())
+    w = solved.weights
     return OptimizationResult(
-        weights=pd.Series(weights, index=assets, name="weight"),
-        expected_return=expected,
-        volatility=volatility,
-        turnover=float(np.abs(weights - current).sum()),
-        objective=expected - float(risk_aversion) * cvar,
+        weights=pd.Series(w, index=assets, name="weight"),
+        expected_return=float(mu @ w),
+        volatility=float(np.std(scenarios.to_numpy() @ w, ddof=1)),
+        turnover=float(np.abs(w - current).sum()),
+        objective=solved.objective,
         group_weights={},
         converged=True,
-        iterations=iteration,
+        iterations=solved.diagnostics["iterations"],
+        diagnostics=solved.diagnostics,
     )
 
 
@@ -2010,77 +1806,62 @@ def optimize_multiperiod(
         if not np.isfinite(numeric_costs.to_numpy(dtype=float)).all() or (numeric_costs < 0).any():
             raise ValueError("linear_costs must be finite and non-negative for every asset")
         costs = numeric_costs.to_numpy(dtype=float)
-    eigenvalues = np.linalg.eigvalsh(cov)
-    step = 0.5 / (float(risk_aversion) * max(float(eigenvalues.max()), 1e-12) + 1.0)
-    projection_tolerance = max(min(float(tolerance), 1e-10), 1e-12)
-    anchor = _project_joint_feasible_set(
-        current,
-        assets,
-        current,
-        0.0,
-        settings,
-        None,
-        {},
-        tolerance=projection_tolerance,
-    )
-    plan = np.tile(anchor, (len(mu_path), 1))
-    mu = mu_path.to_numpy(dtype=float)
-    converged = False
-    iteration = max_iterations
-    for iteration in range(1, max_iterations + 1):
-        updated = np.empty_like(plan)
-        previous = current
-        for period in range(len(mu)):
-            gradient = mu[period] - float(risk_aversion) * (cov @ plan[period])
-            proposal = plan[period] + step * gradient
-            proposal = _project_joint_feasible_set(
-                proposal,
-                assets,
-                previous,
-                0.0,
-                settings,
-                None,
-                {},
-                tolerance=projection_tolerance,
-                trade_penalties=costs,
-                penalty_scale=step,
-            )
-            updated[period] = proposal
-            previous = proposal
-        if float(np.max(np.abs(updated - plan))) <= tolerance:
-            plan = updated
-            converged = True
-            break
-        plan = updated
-    if not converged:
-        raise RuntimeError(
-            f"multi-period optimization did not converge after {max_iterations} iterations"
-        )
-    objective = 0.0
+    from time import perf_counter
+
+    import cvxpy as cp
+
+    from quant_portfolio.solver import OptimizationError, RiskMatrix, _run
+
+    risk = RiskMatrix(covariance=cov)
+    plan = cp.Variable(mu_path.shape)
+    rules, terms = [], []
     previous = current
-    for period in range(len(mu)):
-        violations = _constraint_violations(
-            plan[period],
-            assets,
-            previous,
-            0.0,
-            settings,
-            None,
-            {},
-            tolerance=max(projection_tolerance * 10, 1e-9),
+    for period, mu in enumerate(mu_path.to_numpy(dtype=float)):
+        w = plan[period]
+        trade = w - previous
+        rules.extend(
+            [
+                cp.sum(w) == 1,
+                w >= settings.min_weight,
+                w <= settings.max_weight,
+                cp.norm1(trade) <= settings.max_turnover,
+            ]
         )
-        if not np.isfinite(plan[period]).all() or violations:
-            raise RuntimeError(
-                f"multi-period plan violates constraints at period {period}: {violations}"
+        for group, cap in settings.group_caps.items():
+            mask = [i for i, a in enumerate(assets) if settings.group_by_asset.get(a) == group]
+            rules.append(cp.sum(w[mask]) <= cap)
+        terms.append(
+            mu @ w
+            - 0.5 * risk_aversion * cp.sum_squares(risk.root_expression(cp, w))
+            - costs @ cp.abs(trade)
+        )
+        previous = w
+    problem = cp.Problem(cp.Maximize(sum(terms)), rules)
+    diagnostics = {}
+    if not _run(
+        cp,
+        problem,
+        conic=False,
+        deadline=perf_counter() + 30,
+        diagnostics=diagnostics,
+        max_iterations=max_iterations,
+    ):
+        raise OptimizationError(
+            "infeasible", "multi-period joint constraints are infeasible", diagnostics
+        )
+    previous = current
+    for row in plan.value:
+        violations = _constraint_violations(
+            row, assets, previous, 0.0, settings, None, {}, tolerance=1e-7
+        )
+        if not np.isfinite(row).all() or violations:
+            raise OptimizationError(
+                "numerical_failure", f"multi-period plan violates constraints: {violations}"
             )
-        trade = plan[period] - previous
-        objective += float(mu[period] @ plan[period])
-        objective -= 0.5 * float(risk_aversion) * float(plan[period] @ cov @ plan[period])
-        objective -= float(costs @ np.abs(trade))
-        previous = plan[period]
+        previous = row
     return MultiPeriodResult(
-        weights=pd.DataFrame(plan, index=expected_returns.index, columns=assets),
-        objective=objective,
+        weights=pd.DataFrame(plan.value, index=expected_returns.index, columns=assets),
+        objective=float(problem.value),
         converged=True,
-        iterations=iteration,
+        iterations=diagnostics["iterations"],
     )

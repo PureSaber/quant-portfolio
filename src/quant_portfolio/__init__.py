@@ -1,5 +1,6 @@
 """Sanitized quantitative research and portfolio engineering demos."""
 
+from quant_portfolio.allocation_v2 import AllocationResult, allocate_research
 from quant_portfolio.allocator import PortfolioSnapshot, allocate
 from quant_portfolio.cross_asset import (
     CrossAssetConstraints,
@@ -21,6 +22,7 @@ from quant_portfolio.evaluation import (
     probability_of_backtest_overfitting,
     simulate_market,
 )
+from quant_portfolio.executable import ExecutableTarget, repair_integer_target
 from quant_portfolio.methods import (
     black_litterman_expected_returns,
     constant_correlation_covariance,
@@ -56,6 +58,8 @@ from quant_portfolio.optimization import (
     square_root_impact_cost,
     validate_research_allocation,
 )
+from quant_portfolio.risk_snapshot import RiskSnapshot
+from quant_portfolio.solver import OptimizationError
 from quant_portfolio.synthetic_spread import (
     BacktestMetrics,
     SyntheticSpreadConfig,
@@ -64,24 +68,29 @@ from quant_portfolio.synthetic_spread import (
 )
 
 __all__ = [
+    "AllocationResult",
     "BacktestMetrics",
     "CrossAssetConstraints",
     "CrossAssetInput",
     "CrossAssetOptimizationResult",
     "DeflatedSharpe",
+    "ExecutableTarget",
     "MultiPeriodResult",
     "OptimizationConstraints",
+    "OptimizationError",
     "OptimizationFailure",
     "OptimizationResult",
     "OverfitResult",
     "PITFixedPoint",
     "PITMarketSnapshot",
     "PortfolioSnapshot",
+    "RiskSnapshot",
     "SimulationResult",
     "SyntheticSpreadConfig",
     "TargetPortfolio",
     "allocate",
     "allocate_integer_lots",
+    "allocate_research",
     "backtest_synthetic_spread",
     "black_litterman_expected_returns",
     "conditional_drawdown_at_risk",
@@ -110,6 +119,7 @@ __all__ = [
     "optimize_multiperiod",
     "probability_of_backtest_overfitting",
     "random_matrix_covariance",
+    "repair_integer_target",
     "research_allocation_weights",
     "simulate_market",
     "square_root_impact_cost",

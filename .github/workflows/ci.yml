@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   test:
+    name: test (${{ matrix.python-version }})${{ matrix.os == 'windows-2025' && ' Windows' || '' }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:

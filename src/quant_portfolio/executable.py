@@ -32,6 +32,7 @@ def repair_integer_target(
     quote_trade,
     constraint_residuals,
     max_invested,
+    non_cash_assets=Decimal(0),
     max_buy=None,
     max_sell=None,
     timeout_seconds=30,
@@ -41,6 +42,8 @@ def repair_integer_target(
 
     It is supplied by the execution adapter so rounding and fee rules have one
     owner. Residuals must be independently computed in post-fee NAV weights.
+    non_cash_assets is independently evidenced account value (e.g. unpaid
+    dividends): it contributes to NAV, but can never fund a purchase.
     Current quantities can contain odd-lot remainders; only board-lot trades
     are proposed. No unobserved future market status is used.
     """
@@ -55,6 +58,9 @@ def repair_integer_target(
     if not weights.index.is_unique or not np.isfinite(weights).all() or (weights < -1e-7).any():
         raise ValueError("invalid continuous weights")
     nav, cash = Decimal(str(nav)), Decimal(str(cash))
+    non_cash_assets = Decimal(str(non_cash_assets))
+    if not non_cash_assets.is_finite() or non_cash_assets < 0:
+        raise ValueError("invalid non-cash account assets")
     if not nav.is_finite() or nav <= 0 or not cash.is_finite() or cash < 0:
         raise ValueError("invalid account cash or NAV")
     n = len(assets)
@@ -105,7 +111,7 @@ def repair_integer_target(
             return (float("inf"), float("inf")), None
         invested = sum((Decimal(int(q[i])) * marks[i] for i in range(n)), Decimal(0))
         # Ledger conservation is exact at the supplied marks and quote precision.
-        if balance + invested != post_nav:
+        if balance + invested + non_cash_assets != post_nav:
             raise ValueError("execution quote and account marks do not reconcile")
         w = pd.Series(
             [float(Decimal(int(q[i])) * marks[i] / post_nav) for i in range(n)], index=assets
@@ -215,6 +221,7 @@ def repair_integer_target(
             "constraint_residuals": residuals,
             "seconds": perf_counter() - started,
             "cash": str(balance),
+            "non_cash_assets": str(non_cash_assets),
             "costs": str(costs),
             "post_fee_nav": str(nav - costs),
             "budget_shortfall": float(max_invested)

@@ -360,3 +360,24 @@ def test_unsuccessful_integer_search_does_not_claim_infeasibility():
             max_invested=1.0,
         )
     assert exc.value.status == "repair_failed"
+
+
+def test_unpaid_dividend_counts_in_nav_but_cannot_fund_purchases():
+    kwargs = {
+        "current": {},
+        "prices": {"A": Decimal(10)},
+        "lots": {"A": 100},
+        "cash": Decimal(900),
+        "nav": Decimal(1100),
+        "non_cash_assets": Decimal(200),
+        "quote_trade": lambda a, q: (-Decimal(q) * 10, Decimal(0)),
+        "constraint_residuals": lambda w: {},
+        "max_invested": 1.0,
+    }
+    result = repair_integer_target(pd.Series({"A": 1.0}), **kwargs)
+    assert result.quantities == {}
+    assert result.cash == Decimal(900)
+    assert result.diagnostics["non_cash_assets"] == "200"
+    kwargs["non_cash_assets"] = Decimal(199)
+    with pytest.raises(ValueError, match="do not reconcile"):
+        repair_integer_target(pd.Series({"A": 1.0}), **kwargs)

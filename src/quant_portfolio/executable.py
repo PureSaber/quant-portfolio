@@ -148,7 +148,7 @@ def repair_integer_target(
     # Preserve the account's odd-lot remainder and enforce known quantity limits.
     floor = quantities + np.floor_divide(desired - quantities, steps) * steps
     floor = np.minimum(np.maximum(floor, minimum), maximum)
-    starts = [floor, quantities.copy()]
+    starts = [floor, np.minimum(np.maximum(quantities, minimum), maximum)]
     best = None
     attempts = []
     for seed in starts:

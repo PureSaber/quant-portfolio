@@ -161,7 +161,7 @@ def test_equal_allocation_moves_toward_target_within_turnover_limit() -> None:
         config={"mode": "equal", "max_turnover": 0.2},
     )
     assert weights.to_dict() == pytest.approx({"A": 0.4, "B": 0.2})
-    assert (weights - pd.Series({"A": 0.5, "B": 0.1})).abs().sum() <= 0.2 + 1e-12
+    assert (weights - pd.Series({"A": 0.5, "B": 0.1})).abs().sum() <= 0.2 + 1e-9
 
 
 def test_research_allocation_rejects_open_or_unsupported_inputs() -> None:
@@ -195,7 +195,7 @@ def test_optimizer_rejects_group_turnover_conflict_instead_of_false_convergence(
 
     with pytest.raises(
         ValueError,
-        match="minimum required turnover 0.6 exceeds max_turnover 0.1",
+        match="infeasible: joint constraints",
     ):
         optimize_mean_variance(
             expected,
@@ -302,7 +302,7 @@ def test_factor_constraint_validation_and_infeasibility_are_explicit() -> None:
 
     with pytest.raises(ValueError, match="provided together"):
         optimize_mean_variance(expected, covariance, factor_exposures=exposures)
-    with pytest.raises(ValueError, match="factor_bounds.*cannot be satisfied"):
+    with pytest.raises(ValueError, match="infeasible: joint constraints"):
         optimize_mean_variance(
             expected,
             covariance,
@@ -355,5 +355,6 @@ def test_linear_cost_kink_uses_stable_proximal_convergence() -> None:
     )
 
     assert result.converged
-    assert result.iterations == 1
+    assert result.diagnostics["status"] == "optimal"
+    assert result.diagnostics["max_constraint_residual"] <= 1e-7
     assert result.weights.to_dict() == pytest.approx(current.to_dict())

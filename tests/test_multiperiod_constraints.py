@@ -28,7 +28,12 @@ def test_multiperiod_enforces_group_caps_on_every_date():
         assert weights[["A", "B"]].sum() <= 0.4 + 1e-8
         assert (weights - previous).abs().sum() <= 0.2 + 1e-8
         previous = weights
-    assert result.weights.iloc[0]["A"] > current["A"]
+    # Joint optimum anticipates tomorrow's B signal; the old greedy path
+    # bought A today and could not move enough into B tomorrow.
+    assert result.weights.to_numpy() == pytest.approx(
+        np.array([[0.1, 0.3, 0.6], [0, 0.4, 0.6]]), abs=1e-7
+    )
+    assert result.objective == pytest.approx(0.2051, abs=1e-7)
 
 
 def test_multiperiod_rejects_group_cap_and_turnover_conflict():
@@ -135,10 +140,12 @@ def test_multiperiod_rejects_invalid_solver_inputs(kwargs, message):
 
 def test_multiperiod_independently_checks_returned_plan(monkeypatch):
     # A regressed solver must not publish an infeasible plan as converged.
-    monkeypatch.setattr(
-        "quant_portfolio.optimization._project_joint_feasible_set",
-        lambda *args, **kwargs: np.array([0.8, 0.2]),
-    )
+    def faulty_run(cp, problem, **kwargs):
+        problem.variables()[0].value = np.array([[0.8, 0.2]])
+        kwargs["diagnostics"]["iterations"] = 1
+        return True
+
+    monkeypatch.setattr("quant_portfolio.solver._run", faulty_run)
     with pytest.raises(RuntimeError, match="violates constraints"):
         optimize_multiperiod(
             pd.DataFrame([[0.1, 0.0]], columns=["A", "B"]),

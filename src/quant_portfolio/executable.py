@@ -33,6 +33,7 @@ def repair_integer_target(
     constraint_residuals,
     max_invested,
     non_cash_assets=Decimal(0),
+    fixed_quantities=None,
     max_buy=None,
     max_sell=None,
     timeout_seconds=30,
@@ -66,7 +67,10 @@ def repair_integer_target(
     n = len(assets)
     if n == 0:
         raise ValueError("at least one executable asset is required")
-    for mapping in (current, lots, max_buy or {}, max_sell or {}):
+    fixed_quantities = fixed_quantities or {}
+    if set(fixed_quantities) - set(assets):
+        raise ValueError("fixed quantities contain an unknown asset")
+    for mapping in (current, lots, max_buy or {}, max_sell or {}, fixed_quantities):
         if any(isinstance(v, bool) or not np.isfinite(v) or int(v) != v for v in mapping.values()):
             raise ValueError("quantities and board lots must be integers")
     quantities = np.array([current.get(a, 0) for a in assets], dtype=np.int64)
@@ -88,6 +92,12 @@ def repair_integer_target(
         raise ValueError("invalid tradable quantity")
     minimum = quantities - (sell // steps) * steps
     maximum = quantities + (buy // steps) * steps
+    for i, asset in enumerate(assets):
+        if asset in fixed_quantities:
+            fixed = int(fixed_quantities[asset])
+            if not minimum[i] <= fixed <= maximum[i] or (fixed - quantities[i]) % steps[i]:
+                raise ValueError("fixed target violates known quantity or board-lot constraints")
+            minimum[i] = maximum[i] = fixed
     quote_cache = {}
 
     def evaluate(q):

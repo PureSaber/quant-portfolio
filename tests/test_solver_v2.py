@@ -381,3 +381,20 @@ def test_unpaid_dividend_counts_in_nav_but_cannot_fund_purchases():
     kwargs["non_cash_assets"] = Decimal(199)
     with pytest.raises(ValueError, match="do not reconcile"):
         repair_integer_target(pd.Series({"A": 1.0}), **kwargs)
+
+
+def test_fixed_exit_target_cannot_be_undone_by_integer_distance_repair():
+    result = repair_integer_target(
+        pd.Series({"A": 0.0, "B": 0.5}),
+        current={"A": 100},
+        prices={"A": Decimal(10), "B": Decimal(100)},
+        lots={"A": 100, "B": 100},
+        cash=Decimal(1000),
+        nav=Decimal(2000),
+        quote_trade=lambda a, q: (-Decimal(q) * (10 if a == "A" else 100), Decimal(0)),
+        constraint_residuals=lambda w: {},
+        max_invested=0.5,
+        fixed_quantities={"A": 0},
+    )
+    assert result.quantities == {}
+    assert result.cash == Decimal(2000)

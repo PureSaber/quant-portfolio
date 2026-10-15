@@ -38,6 +38,7 @@ def repair_integer_target(
     max_sell=None,
     timeout_seconds=30,
     max_iterations=2000,
+    max_exchange_candidates=256,
 ):
     """quote_trade(asset, delta) returns exact (cash change, total friction).
 
@@ -55,6 +56,8 @@ def repair_integer_target(
         raise ValueError("max_invested must be in [0, 1]")
     if type(max_iterations) is not int or max_iterations <= 0:
         raise ValueError("max_iterations must be a positive integer")
+    if type(max_exchange_candidates) is not int or max_exchange_candidates <= 0:
+        raise ValueError("max_exchange_candidates must be a positive integer")
     assets = sorted(set(weights.index) | set(current))
     if not weights.index.is_unique or not np.isfinite(weights).all() or (weights < -1e-7).any():
         raise ValueError("invalid continuous weights")
@@ -99,8 +102,11 @@ def repair_integer_target(
                 raise ValueError("fixed target violates known quantity or board-lot constraints")
             minimum[i] = maximum[i] = fixed
     quote_cache = {}
+    evaluations = 0
 
     def evaluate(q):
+        nonlocal evaluations
+        evaluations += 1
         balance, costs = cash, Decimal(0)
         for i, asset in enumerate(assets):
             delta = int(q[i] - quantities[i])
@@ -151,6 +157,7 @@ def repair_integer_target(
     starts = [floor, np.minimum(np.maximum(quantities, minimum), maximum)]
     best = None
     attempts = []
+    mark_weights = np.array([float(p / nav) for p in marks])
     for seed in starts:
         actions = []
         q = seed.copy()
@@ -165,25 +172,42 @@ def repair_integer_target(
             seen.add(key)
             winner, winner_score, winner_details, move = q, score, details, None
 
-            # Single reductions, additions and then single-lot exchanges. Sorting
-            # asset identifiers and strict improvement make ties deterministic.
+            # Rank moves by pre-fee distance, then verify the complete account
+            # and risk constraints. Ranking is a heuristic, never a feasibility
+            # test. First improvement avoids an exhaustive O(n^2) exact ledger
+            # evaluation on every iteration. Ties use sorted asset identifiers.
             def candidates(q):
+                distance = q * mark_weights - target
+                changes = []
                 for i in range(n):
                     for direction in (-1, 1):
-                        candidate = q.copy()
-                        candidate[i] += direction * steps[i]
-                        if minimum[i] <= candidate[i] <= maximum[i]:
-                            yield candidate, [(assets[i], direction * int(steps[i]))]
-                for i in range(n):
-                    if q[i] - steps[i] < minimum[i]:
-                        continue
-                    for j in range(n):
-                        if i == j or q[j] + steps[j] > maximum[j]:
+                        delta = direction * steps[i]
+                        if minimum[i] <= q[i] + delta <= maximum[i]:
+                            dw = delta * mark_weights[i]
+                            changes.append((2 * distance[i] * dw + dw * dw, i, direction))
+                ranked = sorted(changes)
+                for _, i, direction in ranked:
+                    candidate = q.copy()
+                    candidate[i] += direction * steps[i]
+                    yield candidate, [(assets[i], direction * int(steps[i]))]
+                exchanges = []
+                # Pair scores are additive. The best K valid pairs are among
+                # the best K+1 legs on either side (one same-asset exclusion).
+                # Bound temporary memory independently of the asset universe.
+                reductions = [(v, i) for v, i, d in ranked if d == -1][
+                    : max_exchange_candidates + 1
+                ]
+                additions = [(v, i) for v, i, d in ranked if d == 1][: max_exchange_candidates + 1]
+                for reduction, i in reductions:
+                    for addition, j in additions:
+                        if i == j:
                             continue
-                        candidate = q.copy()
-                        candidate[i] -= steps[i]
-                        candidate[j] += steps[j]
-                        yield candidate, [(assets[i], -int(steps[i])), (assets[j], int(steps[j]))]
+                        exchanges.append((reduction + addition, i, j))
+                for _, i, j in sorted(exchanges)[:max_exchange_candidates]:
+                    candidate = q.copy()
+                    candidate[i] -= steps[i]
+                    candidate[j] += steps[j]
+                    yield candidate, [(assets[i], -int(steps[i])), (assets[j], int(steps[j]))]
 
             for candidate, changes in candidates(q):
                 if perf_counter() - started > timeout_seconds:
@@ -196,6 +220,7 @@ def repair_integer_target(
                         candidate_details,
                         changes,
                     )
+                    break
             if move is None:
                 break
             q, score, details = winner, winner_score, winner_details
@@ -203,6 +228,10 @@ def repair_integer_target(
         if score[0] == 0 and (best is None or score < best[0]):
             best = (score, q.copy(), details, list(actions))
         attempts.append({"seed": seed.tolist(), "actions": actions, "residual": score[0]})
+        # The current-position seed is a fallback for failed repair, not a
+        # second optimization from an unrelated allocation after success.
+        if best is not None:
+            break
     if perf_counter() - started > timeout_seconds:
         raise OptimizationError(
             "timeout", "integer repair deadline exceeded", {"repair_attempts": attempts}
@@ -226,6 +255,9 @@ def repair_integer_target(
         {
             "status": "repaired",
             "integer_global_optimum": False,
+            "search_method": "ranked_first_improvement",
+            "max_exchange_candidates": max_exchange_candidates,
+            "exact_candidate_evaluations": evaluations,
             "repair_actions": actions,
             "repair_attempts": attempts,
             "constraint_residuals": residuals,

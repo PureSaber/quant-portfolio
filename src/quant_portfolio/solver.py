@@ -18,6 +18,22 @@ class OptimizationError(ValueError, RuntimeError):
         self.status = status
         self.diagnostics = diagnostics or {}
 
+    def serializable_diagnostics(self):
+        """Preserve non-finite numerical evidence explicitly in valid JSON."""
+
+        def convert(value):
+            if isinstance(value, dict):
+                return {key: convert(item) for key, item in value.items()}
+            if isinstance(value, (list, tuple, np.ndarray)):
+                return [convert(item) for item in value]
+            if isinstance(value, (float, np.floating)) and not np.isfinite(value):
+                return {"non_finite_number": str(float(value))}
+            if isinstance(value, np.generic):
+                return value.item()
+            return value
+
+        return convert(self.diagnostics)
+
 
 class AllocationInputError(OptimizationError):
     """An identified missing input, distinct from a programming ValueError."""

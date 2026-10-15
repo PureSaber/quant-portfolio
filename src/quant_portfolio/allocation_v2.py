@@ -310,7 +310,9 @@ def allocate_research(
         max_turnover=cfg["max_turnover"],
         max_tracking_error=min(tracking_limits) if tracking_limits else None,
     )
-    scenarios = None if history is None else history.to_numpy()
+    scenarios = (
+        history.to_numpy() if mode in {"cvar", "evar", "cdar"} and history is not None else None
+    )
     if v2 and mode in {"cvar", "evar", "cdar"}:
         horizon = cfg["forecast_horizon_sessions"]
         blocks = len(history) // horizon

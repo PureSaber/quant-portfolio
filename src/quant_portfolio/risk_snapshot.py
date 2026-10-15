@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from copy import deepcopy
 from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
 
-from quant_portfolio.solver import RiskMatrix
+from quant_portfolio.solver import AllocationInputError, RiskMatrix
 
 
 def timestamp(value):
@@ -31,9 +33,13 @@ class RiskSnapshot:
     factor_covariance: pd.DataFrame | None = None
     specific_variance: pd.Series | None = None
     benchmark: pd.Series | None = None
+    coverage: dict = field(default_factory=dict)
     _fingerprint: str | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
+        object.__setattr__(self, "coverage", deepcopy(self.coverage))
+        # JSON-safe metadata is included in the immutable input fingerprint.
+        json.dumps(self.coverage, sort_keys=True, allow_nan=False)
         for key in ("estimated_at", "available_at"):
             object.__setattr__(self, key, timestamp(getattr(self, key)))
         if self.estimated_at > self.available_at:
@@ -70,10 +76,16 @@ class RiskSnapshot:
     def matrix(self, assets, decision_at):
         self._check_unchanged()
         if self.available_at > timestamp(decision_at):
-            raise ValueError("risk snapshot was unavailable at decision time")
-        if set(assets) - set(self.assets):
-            raise ValueError(
-                "risk snapshot does not cover candidates, holdings and benchmark union"
+            raise AllocationInputError(
+                "risk snapshot was unavailable at decision time", reason="risk_not_available"
+            )
+        missing = set(assets) - set(self.assets)
+        if missing:
+            raise AllocationInputError(
+                "risk snapshot does not cover candidates, holdings and benchmark union",
+                reason="risk_union_incomplete",
+                assets=missing,
+                details={a: self.coverage.get(a, {"status": "unavailable"}) for a in missing},
             )
         if self.benchmark is not None:
             b = self.benchmark
@@ -116,6 +128,8 @@ class RiskSnapshot:
 
     def _digest(self):
         digest = hashlib.sha256()
+        if self.coverage:
+            digest.update(json.dumps(self.coverage, sort_keys=True, allow_nan=False).encode())
         for value in (
             self.covariance,
             self.exposures,
@@ -140,6 +154,7 @@ class RiskSnapshot:
             "model_version": self.model_version,
             "input_digest": self.input_digest,
             "snapshot_digest": self._fingerprint,
+            "coverage": deepcopy(self.coverage),
         }
 
 
@@ -182,7 +197,11 @@ def mature_ic(labels, *, decision_at, horizon_sessions, lookback, min_periods):
         if len(periods) == lookback:
             break
     if len(periods) < min_periods:
-        raise ValueError("insufficient mature non-overlapping IC periods")
+        raise AllocationInputError(
+            "insufficient mature non-overlapping IC periods",
+            reason="insufficient_mature_ic",
+            details={"observed": len(periods), "required": min_periods},
+        )
     return float(np.mean([x[1] for x in periods])), {
         "ic_periods": len(periods),
         "ic_first_signal": periods[-1][0].isoformat(),

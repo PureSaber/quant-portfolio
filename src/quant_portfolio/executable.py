@@ -39,6 +39,9 @@ def repair_integer_target(
     timeout_seconds=30,
     max_iterations=2000,
     max_exchange_candidates=256,
+    feasibility_seed=None,
+    odd_lot_sell_assets=(),
+    max_backtracks=8,
 ):
     """quote_trade(asset, delta) returns exact (cash change, total friction).
 
@@ -46,8 +49,8 @@ def repair_integer_target(
     owner. Residuals must be independently computed in post-fee NAV weights.
     non_cash_assets is independently evidenced account value (e.g. unpaid
     dividends): it contributes to NAV, but can never fund a purchase.
-    Current quantities can contain odd-lot remainders; only board-lot trades
-    are proposed. No unobserved future market status is used.
+    Purchases use board lots; explicitly opted-in assets may sell their entire
+    odd remainder in one order. No unobserved future market status is used.
     """
     started = perf_counter()
     if not np.isfinite(timeout_seconds) or timeout_seconds <= 0:
@@ -59,6 +62,11 @@ def repair_integer_target(
     if type(max_exchange_candidates) is not int or max_exchange_candidates <= 0:
         raise ValueError("max_exchange_candidates must be a positive integer")
     assets = sorted(set(weights.index) | set(current))
+    odd_lot_sell_assets = set(odd_lot_sell_assets)
+    if odd_lot_sell_assets - set(assets):
+        raise ValueError("odd-lot policy contains an unknown asset")
+    if type(max_backtracks) is not int or max_backtracks < 0:
+        raise ValueError("max_backtracks must be a non-negative integer")
     if not weights.index.is_unique or not np.isfinite(weights).all() or (weights < -1e-7).any():
         raise ValueError("invalid continuous weights")
     nav, cash = Decimal(str(nav)), Decimal(str(cash))
@@ -96,9 +104,29 @@ def repair_integer_target(
     minimum = quantities - (sell // steps) * steps
     maximum = quantities + (buy // steps) * steps
     for i, asset in enumerate(assets):
+        if asset in odd_lot_sell_assets:
+            # A sell may dispose of the entire odd remainder once, never buy it.
+            remainder = quantities[i] % steps[i]
+            if sell[i] >= remainder:
+                odd_sale = remainder + ((sell[i] - remainder) // steps[i]) * steps[i]
+                minimum[i] = min(minimum[i], quantities[i] - odd_sale)
+
+    def legal(i, value):
+        delta = int(value - quantities[i])
+        if not minimum[i] <= value <= maximum[i]:
+            return False
+        if delta % steps[i] == 0:
+            return True
+        return (
+            assets[i] in odd_lot_sell_assets
+            and delta < 0
+            and (-delta) % steps[i] == quantities[i] % steps[i]
+        )
+
+    for i, asset in enumerate(assets):
         if asset in fixed_quantities:
             fixed = int(fixed_quantities[asset])
-            if not minimum[i] <= fixed <= maximum[i] or (fixed - quantities[i]) % steps[i]:
+            if not legal(i, fixed):
                 raise ValueError("fixed target violates known quantity or board-lot constraints")
             minimum[i] = maximum[i] = fixed
     quote_cache = {}
@@ -124,7 +152,7 @@ def repair_integer_target(
                 costs += friction
         post_nav = nav - costs
         if post_nav <= 0:
-            return (float("inf"), float("inf")), None
+            return (float("inf"), float("inf"), float("inf")), None
         invested = sum((Decimal(int(q[i])) * marks[i] for i in range(n)), Decimal(0))
         # Ledger conservation is exact at the supplied marks and quote precision.
         if balance + invested + non_cash_assets != post_nav:
@@ -138,6 +166,8 @@ def repair_integer_target(
         bound_error = max(
             float(np.max(minimum - q, initial=0)), float(np.max(q - maximum, initial=0))
         )
+        if any(not legal(i, q[i]) for i in range(n)):
+            bound_error = max(bound_error, 1.0)
         residual = max(
             [
                 0.0,
@@ -148,26 +178,73 @@ def repair_integer_target(
             ]
         )
         objective = float(np.sum((w.to_numpy() - target) ** 2))
-        return (residual if residual > 1e-7 else 0.0, objective), (w, balance, costs, violations)
+        # A squared violation merit allows fixing several equally binding asset
+        # caps one by one. Max-residual-only descent stalls on those plateaus.
+        energy = sum(max(float(v), 0) ** 2 for v in violations.values()) + (
+            max(-float(balance / nav), 0) ** 2
+            + max(float(invested / nav) - max_invested, 0) ** 2
+            + bound_error**2
+        )
+        score = (
+            (max(energy, 1e-30), residual, objective) if residual > 1e-7 else (0.0, 0.0, objective)
+        )
+        return score, (w, balance, costs, violations)
 
-    desired = np.array([int(nav * Decimal(str(max(target[i], 0))) / marks[i]) for i in range(n)])
-    # Preserve the account's odd-lot remainder and enforce known quantity limits.
-    floor = quantities + np.floor_divide(desired - quantities, steps) * steps
-    floor = np.minimum(np.maximum(floor, minimum), maximum)
-    starts = [floor, np.minimum(np.maximum(quantities, minimum), maximum)]
+    def rounded(point):
+        desired = np.array([int(nav * Decimal(str(max(point[i], 0))) / marks[i]) for i in range(n)])
+        floor = quantities + np.floor_divide(desired - quantities, steps) * steps
+        floor = np.minimum(np.maximum(floor, minimum), maximum)
+        for i in range(n):
+            if assets[i] in odd_lot_sell_assets and desired[i] == 0 and legal(i, 0):
+                floor[i] = 0
+        return floor
+
+    floor = rounded(target)
     best = None
     attempts = []
+
+    def starts():
+        yield "rounded_strategy", floor, {}
+        if feasibility_seed is not None:
+            remaining = timeout_seconds - (perf_counter() - started)
+            if remaining > 0:
+                try:
+                    point, metadata = feasibility_seed(remaining)
+                    if not isinstance(point, pd.Series) or set(point.index) != set(assets):
+                        raise ValueError("feasibility seed must cover executable assets")
+                    point = point.reindex(assets).to_numpy(dtype=float)
+                    if not np.isfinite(point).all() or (point < -1e-7).any():
+                        raise ValueError("invalid feasibility seed")
+                    yield "minimum_risk_feasibility", rounded(point), metadata
+                except OptimizationError as exc:
+                    attempts.append(
+                        {
+                            "seed_kind": "minimum_risk_feasibility",
+                            "status": exc.status,
+                            "diagnostics": exc.diagnostics,
+                        }
+                    )
+        yield "current_account", np.minimum(np.maximum(quantities, minimum), maximum), {}
+
     mark_weights = np.array([float(p / nav) for p in marks])
-    for seed in starts:
+    for seed_name, seed, seed_metadata in starts():
         actions = []
         q = seed.copy()
         score, details = evaluate(q)
+        seed_deadline = started + max(timeout_seconds - 0.05, timeout_seconds * 0.95)
+        if seed_name == "rounded_strategy" and score[0] > 0 and feasibility_seed is not None:
+            seed_deadline = min(seed_deadline, perf_counter() + min(3.0, timeout_seconds / 4))
         seen = set()
+        frontier = []
+        backtracks = 0
+        termination = "iteration_limit"
         for iteration in range(max_iterations):
-            if perf_counter() - started > timeout_seconds:
+            if perf_counter() > seed_deadline:
+                termination = "seed_time_budget"
                 break
             key = tuple(q)
             if key in seen:
+                termination = "repeated_state"
                 break
             seen.add(key)
             winner, winner_score, winner_details, move = q, score, details, None
@@ -176,13 +253,13 @@ def repair_integer_target(
             # and risk constraints. Ranking is a heuristic, never a feasibility
             # test. First improvement avoids an exhaustive O(n^2) exact ledger
             # evaluation on every iteration. Ties use sorted asset identifiers.
-            def candidates(q):
+            def candidates(q, score=score, backtracks=backtracks):
                 distance = q * mark_weights - target
                 changes = []
                 for i in range(n):
                     for direction in (-1, 1):
                         delta = direction * steps[i]
-                        if minimum[i] <= q[i] + delta <= maximum[i]:
+                        if legal(i, q[i] + delta):
                             dw = delta * mark_weights[i]
                             changes.append((2 * distance[i] * dw + dw * dw, i, direction))
                 ranked = sorted(changes)
@@ -190,6 +267,14 @@ def repair_integer_target(
                     candidate = q.copy()
                     candidate[i] += direction * steps[i]
                     yield candidate, [(assets[i], direction * int(steps[i]))]
+                # Sell the remaining odd shares as one order, including a full
+                # exit. Ordinary purchases remain whole board lots.
+                for i in range(n):
+                    for value in (q[i] - q[i] % steps[i], 0):
+                        if value != q[i] and legal(i, value):
+                            candidate = q.copy()
+                            candidate[i] = value
+                            yield candidate, [(assets[i], int(value - q[i]))]
                 exchanges = []
                 # Pair scores are additive. The best K valid pairs are among
                 # the best K+1 legs on either side (one same-asset exclusion).
@@ -208,10 +293,38 @@ def repair_integer_target(
                     candidate[i] -= steps[i]
                     candidate[j] += steps[j]
                     yield candidate, [(assets[i], -int(steps[i])), (assets[j], int(steps[j]))]
+                # Larger legs and unequal exchanges cross local single-lot
+                # barriers. Exact account evaluation still decides acceptance.
+                if score[0] > 0:
+                    for _, i, direction in ranked[:64]:
+                        for multiple in (2, 4, 8):
+                            delta = direction * steps[i] * multiple
+                            if legal(i, q[i] + delta):
+                                candidate = q.copy()
+                                candidate[i] += delta
+                                yield candidate, [(assets[i], int(delta))]
+                    width = min(max_exchange_candidates * (1 + backtracks), 2048)
+                    for _, i, j in sorted(exchanges)[:width]:
+                        for left, right in ((1, 2), (2, 1), (2, 2), (1, 4), (4, 1)):
+                            if legal(i, q[i] - left * steps[i]) and legal(
+                                j, q[j] + right * steps[j]
+                            ):
+                                candidate = q.copy()
+                                candidate[i] -= left * steps[i]
+                                candidate[j] += right * steps[j]
+                                yield (
+                                    candidate,
+                                    [
+                                        (assets[i], -int(left * steps[i])),
+                                        (assets[j], int(right * steps[j])),
+                                    ],
+                                )
 
             for candidate, changes in candidates(q):
-                if perf_counter() - started > timeout_seconds:
+                if perf_counter() > seed_deadline:
                     break
+                if tuple(candidate) in seen:
+                    continue
                 candidate_score, candidate_details = evaluate(candidate)
                 if candidate_score < winner_score:
                     winner, winner_score, winner_details, move = (
@@ -221,13 +334,40 @@ def repair_integer_target(
                         changes,
                     )
                     break
+                if score[0] > 0 and backtracks < max_backtracks and tuple(candidate) not in seen:
+                    frontier.append(
+                        (candidate_score, tuple(candidate), candidate_details, actions + [changes])
+                    )
+                    frontier.sort(key=lambda item: (item[0], item[1]))
+                    del frontier[max_backtracks:]
             if move is None:
+                while frontier and tuple(frontier[0][1]) in seen:
+                    frontier.pop(0)
+                if score[0] > 0 and frontier and backtracks < max_backtracks:
+                    score, point, details, actions = frontier.pop(0)
+                    q = np.asarray(point, dtype=np.int64)
+                    backtracks += 1
+                    continue
+                termination = "local_search_exhausted" if score[0] > 0 else "feasible_local_optimum"
                 break
             q, score, details = winner, winner_score, winner_details
             actions.append(move)
         if score[0] == 0 and (best is None or score < best[0]):
             best = (score, q.copy(), details, list(actions))
-        attempts.append({"seed": seed.tolist(), "actions": actions, "residual": score[0]})
+        attempts.append(
+            {
+                "seed_kind": seed_name,
+                "seed": seed.tolist(),
+                "actions": actions,
+                "residual": score[1],
+                "violation_energy": score[0],
+                "constraint_residuals": None if details is None else details[3],
+                "final_quantities": q.tolist(),
+                "termination": termination,
+                "backtracks": backtracks,
+                "seed_diagnostics": seed_metadata,
+            }
+        )
         # The current-position seed is a fallback for failed repair, not a
         # second optimization from an unrelated allocation after success.
         if best is not None:
@@ -240,7 +380,14 @@ def repair_integer_target(
         raise OptimizationError(
             "repair_failed",
             "local repair found no verified executable target",
-            {"repair_attempts": attempts, "seconds": perf_counter() - started},
+            {
+                "stage": "integer_repair",
+                "asset_order": assets,
+                "repair_attempts": attempts,
+                "exact_candidate_evaluations": evaluations,
+                "seconds": perf_counter() - started,
+                "integer_infeasibility_proven": False,
+            },
         )
     score, q, details, actions = best
     final_score, details = evaluate(q)
@@ -255,11 +402,12 @@ def repair_integer_target(
         {
             "status": "repaired",
             "integer_global_optimum": False,
-            "search_method": "ranked_first_improvement",
+            "search_method": "constraint_repair_with_feasibility_seed_and_bounded_backtracking",
             "max_exchange_candidates": max_exchange_candidates,
             "exact_candidate_evaluations": evaluations,
             "repair_actions": actions,
             "repair_attempts": attempts,
+            "asset_order": assets,
             "constraint_residuals": residuals,
             "seconds": perf_counter() - started,
             "cash": str(balance),

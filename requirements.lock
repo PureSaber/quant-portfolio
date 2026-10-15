@@ -29,8 +29,8 @@ pytest-cov==7.1.0
 python-dateutil==2.9.0.post0
 pytz==2026.3.post1
 pyyaml==6.0.3
-quant-data-kit @ git+https://github.com/PureSaber/quant-data-kit.git@ad3440700b226497c40093197f1df4321b49d1e8
-quant-execution @ git+https://github.com/PureSaber/quant-execution.git@8423726a9d80b6509d2c016a7478fc0f40a29774
+quant-data-kit @ git+https://github.com/PureSaber/quant-data-kit.git@b6edcf755c681e0e73ad02a99334b2714af9b2f7
+quant-execution @ git+https://github.com/PureSaber/quant-execution.git@a45f884779f2cd145fecc39edbdb5e8eb9628e89
 referencing==0.37.0
 rpds-py==0.30.0
 ruff==0.16.10

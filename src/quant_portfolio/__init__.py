@@ -59,7 +59,7 @@ from quant_portfolio.optimization import (
     validate_research_allocation,
 )
 from quant_portfolio.risk_snapshot import RiskSnapshot
-from quant_portfolio.solver import OptimizationError
+from quant_portfolio.solver import AllocationInputError, OptimizationError
 from quant_portfolio.synthetic_spread import (
     BacktestMetrics,
     SyntheticSpreadConfig,
@@ -68,6 +68,7 @@ from quant_portfolio.synthetic_spread import (
 )
 
 __all__ = [
+    "AllocationInputError",
     "AllocationResult",
     "BacktestMetrics",
     "CrossAssetConstraints",

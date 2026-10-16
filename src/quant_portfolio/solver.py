@@ -18,6 +18,38 @@ class OptimizationError(ValueError, RuntimeError):
         self.status = status
         self.diagnostics = diagnostics or {}
 
+    def serializable_diagnostics(self):
+        """Preserve non-finite numerical evidence explicitly in valid JSON."""
+
+        def convert(value):
+            if isinstance(value, dict):
+                return {key: convert(item) for key, item in value.items()}
+            if isinstance(value, (list, tuple, np.ndarray)):
+                return [convert(item) for item in value]
+            if isinstance(value, (float, np.floating)) and not np.isfinite(value):
+                return {"non_finite_number": str(float(value))}
+            if isinstance(value, np.generic):
+                return value.item()
+            return value
+
+        return convert(self.diagnostics)
+
+
+class AllocationInputError(OptimizationError):
+    """An identified missing input, distinct from a programming ValueError."""
+
+    def __init__(self, message, *, reason, assets=(), details=None):
+        super().__init__(
+            "input_unavailable",
+            message,
+            {
+                "stage": "input",
+                "reason": reason,
+                "missing_assets": sorted(assets),
+                "details": details or {},
+            },
+        )
+
 
 @dataclass(frozen=True)
 class RiskMatrix:
@@ -112,6 +144,7 @@ def constraint_residuals(
     benchmark=None,
     turnover_offset=0.0,
     budget_equality=True,
+    detailed_asset_bounds=False,
 ):
     """Independent NumPy acceptance check; positive values denote violations."""
     w = np.asarray(weights, float)
@@ -125,6 +158,12 @@ def constraint_residuals(
         "asset_upper": float(np.max(w - hi)),
         "turnover": float(np.abs(w - current).sum()) + turnover_offset - settings.max_turnover,
     }
+    if detailed_asset_bounds:
+        lower_vector = np.broadcast_to(lo, w.shape)
+        upper_vector = np.broadcast_to(hi, w.shape)
+        for i, asset in enumerate(assets):
+            result["asset_lower:" + asset] = float(lower_vector[i] - w[i])
+            result["asset_upper:" + asset] = float(w[i] - upper_vector[i])
     for group, cap in settings.group_caps.items():
         result["group:" + group] = (
             sum(w[i] for i, a in enumerate(assets) if settings.group_by_asset.get(a) == group) - cap

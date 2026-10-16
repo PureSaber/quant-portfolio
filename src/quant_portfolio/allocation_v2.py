@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 from dataclasses import dataclass, field
+from time import perf_counter
 
 import numpy as np
 import pandas as pd
@@ -55,7 +56,9 @@ def allocate_research(
     signal_cross_section=None,
     max_tracking_error_override=None,
     factor_bounds_absolute=False,
+    remaining_timeout_seconds=None,
 ):
+    allocation_started = perf_counter()
     from quant_portfolio.optimization import (
         OptimizationConstraints,
         _research_covariance,
@@ -65,6 +68,11 @@ def allocate_research(
 
     v2 = config.get("protocol_version") == 2
     cfg = validate_v2(config) if v2 else validate_research_allocation(config)
+    timeout = cfg.get("timeout_seconds", 30)
+    if remaining_timeout_seconds is not None:
+        if not np.isfinite(remaining_timeout_seconds) or remaining_timeout_seconds <= 0:
+            raise ValueError("remaining_timeout_seconds must be finite and positive")
+        timeout = min(timeout, float(remaining_timeout_seconds))
     if not isinstance(scores, pd.Series) or scores.empty or not scores.index.is_unique:
         raise ValueError("scores must be a non-empty Series with unique assets")
     scores = scores.astype(float)
@@ -302,7 +310,9 @@ def allocate_research(
         max_turnover=cfg["max_turnover"],
         max_tracking_error=min(tracking_limits) if tracking_limits else None,
     )
-    scenarios = None if history is None else history.to_numpy()
+    scenarios = (
+        history.to_numpy() if mode in {"cvar", "evar", "cdar"} and history is not None else None
+    )
     if v2 and mode in {"cvar", "evar", "cdar"}:
         horizon = cfg["forecast_horizon_sessions"]
         blocks = len(history) // horizon
@@ -314,33 +324,85 @@ def allocate_research(
             )
             - 1
         )
-    solved = solve_portfolio(
-        mu,
-        risk,
-        current.to_numpy(),
-        settings,
-        assets=assets,
-        budget=invested_limit,
-        lower=lo,
-        upper=hi,
-        factor_exposures=x,
-        factor_bounds=bounds,
-        benchmark=wb,
-        active_risk=diag["risk_objective"] == "active",
-        kind=METHODS[mode]["objective"],
-        target=target,
-        linear_costs=cost_vector(linear_costs),
-        buy_costs=cost_vector(buy_costs),
-        sell_costs=cost_vector(sell_costs),
-        risk_aversion=cfg["risk_aversion"],
-        risk_scale=horizon_scale,
-        turnover_penalty=cfg["turnover_penalty"],
-        impact=impact,
-        scenarios=scenarios,
-        beta=cfg.get(mode + "_beta", 0.95),
-        risk_free_rate=cfg.get("risk_free_rate", 0),
-        timeout_seconds=cfg.get("timeout_seconds", 30),
-    )
+    context = {
+        "assets": assets,
+        "risk": risk,
+        "benchmark": wb,
+        "settings": settings,
+        "factor_exposures": x,
+        "factor_bounds": bounds,
+        "current": current.to_numpy(),
+        "lower": lo,
+        "upper": hi,
+        "budget": invested_limit,
+        "expected_returns": mu,
+        "objective": {
+            "kind": METHODS[mode]["objective"],
+            "active_risk": diag["risk_objective"] == "active",
+            "target": None if target is None else np.asarray(target).tolist(),
+            "linear_costs": None if linear_costs is None else cost_vector(linear_costs).tolist(),
+            "buy_costs": None if buy_costs is None else cost_vector(buy_costs).tolist(),
+            "sell_costs": None if sell_costs is None else cost_vector(sell_costs).tolist(),
+            "risk_aversion": cfg["risk_aversion"],
+            "risk_scale": horizon_scale,
+            "turnover_penalty": cfg["turnover_penalty"],
+            "impact": np.asarray(impact).tolist() if impact is not None else None,
+            "scenarios": np.asarray(scenarios).tolist() if scenarios is not None else None,
+            "beta": cfg.get(mode + "_beta", 0.95),
+            "risk_free_rate": cfg.get("risk_free_rate", 0),
+        },
+    }
+    from quant_portfolio.feasibility import diagnose_feasibility, problem_payload
+    from quant_portfolio.solver import OptimizationError
+
+    remaining_solve = timeout - (perf_counter() - allocation_started)
+    if remaining_solve <= 0:
+        raise OptimizationError(
+            "timeout",
+            "allocation input construction exhausted rebalance deadline",
+            {**diag, "stage": "input_construction", "problem": problem_payload(context)},
+        )
+    try:
+        solved = solve_portfolio(
+            mu,
+            risk,
+            current.to_numpy(),
+            settings,
+            assets=assets,
+            budget=invested_limit,
+            lower=lo,
+            upper=hi,
+            factor_exposures=x,
+            factor_bounds=bounds,
+            benchmark=wb,
+            active_risk=diag["risk_objective"] == "active",
+            kind=METHODS[mode]["objective"],
+            target=target,
+            linear_costs=cost_vector(linear_costs),
+            buy_costs=cost_vector(buy_costs),
+            sell_costs=cost_vector(sell_costs),
+            risk_aversion=cfg["risk_aversion"],
+            risk_scale=horizon_scale,
+            turnover_penalty=cfg["turnover_penalty"],
+            impact=impact,
+            scenarios=scenarios,
+            beta=cfg.get(mode + "_beta", 0.95),
+            risk_free_rate=cfg.get("risk_free_rate", 0),
+            timeout_seconds=remaining_solve,
+        )
+    except OptimizationError as exc:
+        remaining = timeout - (perf_counter() - allocation_started)
+        exc.diagnostics = {
+            **diag,
+            **exc.diagnostics,
+            "stage": "continuous",
+            "problem": problem_payload(context),
+        }
+        if exc.status == "infeasible" and remaining > 0:
+            exc.diagnostics["feasibility"] = diagnose_feasibility(
+                context, timeout_seconds=min(2.0, remaining)
+            )
+        raise
     w = solved.weights
     diag.update(
         solved.diagnostics, expected_return=float(mu @ w), turnover=float(np.abs(w - current).sum())
@@ -375,13 +437,5 @@ def allocate_research(
     return AllocationResult(
         result,
         diag,
-        {
-            "assets": assets,
-            "risk": risk,
-            "benchmark": wb,
-            "settings": settings,
-            "factor_exposures": x,
-            "factor_bounds": bounds,
-            "current": current.to_numpy(),
-        },
+        context,
     )

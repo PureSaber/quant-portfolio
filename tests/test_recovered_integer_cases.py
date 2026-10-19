@@ -66,7 +66,10 @@ def replay(case):
 
     started = time.perf_counter()
     row = {k: case[k] for k in ("scenario", "date")}
-    remaining = 30 - d["continuous_solver"].get("seconds", 0)
+    continuous_seconds = d["continuous_solver"].get(
+        "total_seconds", d["continuous_solver"].get("seconds", 0)
+    )
+    remaining = 30 - continuous_seconds
     try:
         result = repair_integer_target(
             pd.Series(d["continuous_weights"]).reindex(sorted(marks), fill_value=0),
@@ -95,6 +98,7 @@ def replay(case):
     except OptimizationError as exc:
         row.update(status=exc.status, diagnostics=exc.serializable_diagnostics())
     row["seconds"] = time.perf_counter() - started
+    row["combined_recorded_seconds"] = continuous_seconds + row["seconds"]
     return row
 
 
@@ -123,4 +127,5 @@ def test_frozen_witness_cases_repaired_from_continuous_target(case):
     assert result["status"] == "published"
     assert result["residual"] <= 1e-7
     assert result["seconds"] <= 30
+    assert result["combined_recorded_seconds"] <= 30
     assert result["diagnostics"]["integer_global_optimum"] is False

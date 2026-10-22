@@ -1,0 +1,501 @@
+{
+  "schema": "quant-portfolio.lot-repair-acceptance/v1",
+  "scope": "Search-only repair on the recovered-input baseline; retrospective software evidence.",
+  "reviewed_head": "fc7e94cc90f4bfd013da3c1a56cd677bc73b5d12",
+  "producer_pin": "1074f20320eb3cffc98e02968552b4ef464f6132",
+  "source_equivalence": "git diff 1074f20 fc7e94c -- src is empty",
+  "scenarios": 62,
+  "new_search_replays": 36,
+  "certified_unchanged_scenarios": 26,
+  "baseline": {
+    "published": 1519,
+    "input_unavailable": 1257,
+    "infeasible": 5519,
+    "repair_failed": 41
+  },
+  "search": {
+    "published": 1607,
+    "input_unavailable": 671,
+    "infeasible": 5465,
+    "repair_failed": 25
+  },
+  "full_horizon": {
+    "baseline": 32,
+    "search": 27
+  },
+  "common_evaluated_decisions": 7768,
+  "transitions": [
+    {
+      "baseline": "infeasible",
+      "search": "infeasible",
+      "count": 5420
+    },
+    {
+      "baseline": "infeasible",
+      "search": "repair_failed",
+      "count": 1
+    },
+    {
+      "baseline": "input_unavailable",
+      "search": "infeasible",
+      "count": 44
+    },
+    {
+      "baseline": "input_unavailable",
+      "search": "input_unavailable",
+      "count": 671
+    },
+    {
+      "baseline": "input_unavailable",
+      "search": "published",
+      "count": 70
+    },
+    {
+      "baseline": "input_unavailable",
+      "search": "repair_failed",
+      "count": 2
+    },
+    {
+      "baseline": "published",
+      "search": "published",
+      "count": 1516
+    },
+    {
+      "baseline": "published",
+      "search": "repair_failed",
+      "count": 3
+    },
+    {
+      "baseline": "repair_failed",
+      "search": "infeasible",
+      "count": 1
+    },
+    {
+      "baseline": "repair_failed",
+      "search": "published",
+      "count": 21
+    },
+    {
+      "baseline": "repair_failed",
+      "search": "repair_failed",
+      "count": 19
+    }
+  ],
+  "fixed_cases": {
+    "total": 41,
+    "published": 19,
+    "remaining_search_failures": 22,
+    "maximum_independent_residual": 7.205636508994528e-08
+  },
+  "audit": {
+    "combined_search_and_held_audits": 72,
+    "combined_published_targets": 3234,
+    "combined_maximum_residual": 9.665701646011104e-08,
+    "all_exact_journals_balanced": true
+  },
+  "search_performance": {
+    "published_rebalance_seconds": {
+      "n": 1607,
+      "median": 0.6236862000077963,
+      "p95": 2.3649092200153947,
+      "maximum": 16.4966702000238
+    },
+    "repair_component_seconds": {
+      "n": 1632,
+      "median": 0.5337471999810077,
+      "p95": 3.0998757950000977,
+      "maximum": 29.342177200014703
+    },
+    "published_over_30_seconds": 0,
+    "process_peak_bytes": {
+      "n": 36,
+      "median": 1214519296.0,
+      "p95": 1345630208.0,
+      "maximum": 1395822592.0
+    },
+    "whole_replay_wall_seconds": {
+      "n": 36,
+      "median": 1179.7293311499816,
+      "p95": 2398.032133175017,
+      "maximum": 2735.107901899959
+    },
+    "budget_shortfall": {
+      "n": 1607,
+      "median": 0.005560216331764289,
+      "p95": 0.0156177727964075,
+      "maximum": 0.03122978563913248
+    }
+  },
+  "performance_scope": "36 actual native account replay attempts per variant; 26 certified frozen reuses excluded. Published rebalance wall clock and repair component timings are separate. Full failure wall clocks were not recorded and cannot be inferred from solver time.",
+  "residual_threshold": 1e-07,
+  "constraints_changed": false,
+  "objective_changed": false,
+  "promotion_approved": false,
+  "frozen_account_deployed": false,
+  "limitations": [
+    "Six account endpoints differ; prefix returns cannot establish a full-horizon improvement.",
+    "Three previously published decisions become repair_failed on the changed account path.",
+    "22 frozen fixed-case failures and 25 full-path failures are different populations.",
+    "The combined independent-audit maximum includes the deferred held-exposure variant.",
+    "No historical-failure full wall clocks or global integer optimality claims.",
+    "The held-exposure feature and its 20 additional targets are excluded from this acceptance."
+  ],
+  "original_inputs_reverified_20261022": [
+    {
+      "name": "panel.pkl",
+      "sha256": "ee338c66577456bb9bbd7ef2c9e9f290ca7e63d56f94baee52f65972f6b6ef40"
+    },
+    {
+      "name": "risk-models.pkl",
+      "sha256": "0a68007c247d5740bd80247bb87d0b9ec77ba5a70008838562336465df058075"
+    },
+    {
+      "name": "portfolio-risk-models.pkl",
+      "sha256": "924376340ee14725f70756bd3922df6acd93033489de88e0b3acfe200a98e2fd"
+    },
+    {
+      "name": "execution-bars.parquet",
+      "sha256": "245138ea7f880c4a7ba2cf9ea3b2f862fc0da3a3024dbaa6d82159e35c20bfe1"
+    },
+    {
+      "name": "execution-actions.parquet",
+      "sha256": "69ae90a8e31d1f62629465f34f3765188620c378a190ddbe2b7f3afc75ba23c7"
+    },
+    {
+      "name": "corporate-action-events.pkl",
+      "sha256": "f7c6df7d588e1d47a843df901a611e7447edaaa01bca33cb5bb64e19290535b1"
+    },
+    {
+      "name": "execution-catalog.csv",
+      "sha256": "04600918867b313edf547d83cbef72cec9d6208df86fa17d1439d34f7b361fb3"
+    },
+    {
+      "name": "protocol.json",
+      "sha256": "fd4dfb18134f4f8e05cf3cdd6e9fa354bb02b8c9e75a1f63af98bf4c031c806e"
+    },
+    {
+      "name": "execution-input-guards.json",
+      "sha256": "1c43cc01d7dc72779e1728d675ae0bd7fa92119b8c4ca5bf7be29130739504e3"
+    },
+    {
+      "name": "execution-input-issues.json",
+      "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "name": "source-trading-status.parquet",
+      "sha256": "0f44929af290b55b623799e3c16d132fad38a71ebe148e53496c9add4c519488"
+    },
+    {
+      "name": "histories.pkl",
+      "sha256": "c5dc9ca596f2ee034bf8e337b8572403c3d7d821336e91344bf510c907febeb5"
+    },
+    {
+      "name": "panel.pkl",
+      "sha256": "32d8c253aa2e27318a3384351889b85fb333825d0fb884ebed7e16a3d63ff4f4"
+    }
+  ],
+  "independent_audits": [
+    {
+      "name": "held-000.json",
+      "sha256": "1c7017a7c5391922b2a6522a30f5fd26ee66e633f304604c0516baeed76b30ca"
+    },
+    {
+      "name": "held-001.json",
+      "sha256": "a2c21f5fa13fb2591f5da5a7ad838bd45390a254465191027a7846475e1f5006"
+    },
+    {
+      "name": "held-004.json",
+      "sha256": "4e3c70b0ba75956da9222cef1626c4462123fd9aebb723b89fef2b340e77ff35"
+    },
+    {
+      "name": "held-005.json",
+      "sha256": "8c295808d7b100df82d0e0fbfa4354f5045d9c9f4f644fc8119cbaf5b9702d42"
+    },
+    {
+      "name": "held-006.json",
+      "sha256": "02be36e5a31cf1eec20c35ae3c990da1a393463f432df5d77a74733953735052"
+    },
+    {
+      "name": "held-009.json",
+      "sha256": "9f968010eb6e6c6ac8659c70d2eb79b1d085b708e1bd9b6a3ca3f24d01d410e8"
+    },
+    {
+      "name": "held-010.json",
+      "sha256": "e259b16b6ff705ad96ca59dbef34c36c83a675dae76a0a19ba8025e9f07bb4c1"
+    },
+    {
+      "name": "held-011.json",
+      "sha256": "b7bcc388e4511e6e7868987ccc9b501d20ea89875f0a98932792ed5cfcd08e9d"
+    },
+    {
+      "name": "held-014.json",
+      "sha256": "ca0812a7a52b0b9dd5ce54bb164a1fa7e5158823fcf72fa0cf8aa3fc314229af"
+    },
+    {
+      "name": "held-015.json",
+      "sha256": "b8afb39b77285169443d18c15cc2be6facf3744398391909cf65aef6ac716264"
+    },
+    {
+      "name": "held-016.json",
+      "sha256": "e307eae20b4bdfef2eed81d22d7d80b2af8883340bea98557c9ec6606d48d5b1"
+    },
+    {
+      "name": "held-019.json",
+      "sha256": "56e9d884f3b0dfd5aa8e7099c3766e45c6063dea2d013865eef0ce6bdf247ee2"
+    },
+    {
+      "name": "held-020.json",
+      "sha256": "f17c9c60c9ab0341a9d0037bd99dfb47e5b88b5559d77a65169f3d5b1240f8d8"
+    },
+    {
+      "name": "held-021.json",
+      "sha256": "22d8da507b4a050ab108fc5b83e2d745953231b08ebd0c66a0bf8bde7a0f0b2f"
+    },
+    {
+      "name": "held-024.json",
+      "sha256": "8e9d7c7bf56b7c59b5c3ebc10700410a7fb1d6c081f1d0183dc2cac3fa3e0a3f"
+    },
+    {
+      "name": "held-025.json",
+      "sha256": "9306bd324d61cbbf0db32b93efb91ded8ca04ed732dc2e8b7856151a527dbf1d"
+    },
+    {
+      "name": "held-026.json",
+      "sha256": "960531c9a9a25627ce53527652234e37f3c8c772fbb2d70573ff1e1d840ffb8b"
+    },
+    {
+      "name": "held-029.json",
+      "sha256": "d4c2518b2df2b553318586bc76472d995a9099654e0735bd89bb49f86b59cb99"
+    },
+    {
+      "name": "held-030.json",
+      "sha256": "48298c5537d8008bb3143f19a68927fd8095d08393cef77c4110adcd506cb855"
+    },
+    {
+      "name": "held-031.json",
+      "sha256": "b5b1d1e07b23b471ab70c21963c3762c9ad70424dd13928d3b666cf227b781f8"
+    },
+    {
+      "name": "held-032.json",
+      "sha256": "ca9bafd7d56af8f5f1afb14a44140d454f734563406ade00571021f95d0ecfaf"
+    },
+    {
+      "name": "held-037.json",
+      "sha256": "5667205c3463581f51f30b909dbcd7aed38d737de3318a5b4eab2922fa4f3d39"
+    },
+    {
+      "name": "held-040.json",
+      "sha256": "dba582b4de058f9a8d99469f560c7c8bcf44b1f6d205d11dde17e81af90e80e5"
+    },
+    {
+      "name": "held-041.json",
+      "sha256": "9ed9a4067055072a026e6b92b963f0443b5b1d92a868ca2b26c987eaf38c451f"
+    },
+    {
+      "name": "held-042.json",
+      "sha256": "5222456ff5646773ba466b07d5bde8772556c76f9e61c3484aba081c834afca7"
+    },
+    {
+      "name": "held-045.json",
+      "sha256": "ce014e696ef15170922a3da67cd18aff99cf6880c17360fb1ae748eff1656ab9"
+    },
+    {
+      "name": "held-046.json",
+      "sha256": "765b7f128b4093a183150c5c65c4c755e7f41a53021468dc53f478f6c937a6b2"
+    },
+    {
+      "name": "held-047.json",
+      "sha256": "b3fe8b634c04feb8f98061c5abda9941c2a1f0f26cee9d52f222e5ff99ea2dd5"
+    },
+    {
+      "name": "held-050.json",
+      "sha256": "2e52f5b5360142aadffb811eb8da9f10db02faf779bc1aa5263499473785aedc"
+    },
+    {
+      "name": "held-051.json",
+      "sha256": "150209e20f236340258b2aa0cafafd4403f3472b72d4774b677e87f3ba59c575"
+    },
+    {
+      "name": "held-052.json",
+      "sha256": "d8edc20dd1598b7ecec6addfc5c2bd977913993475d1a34d74da161fd519f793"
+    },
+    {
+      "name": "held-055.json",
+      "sha256": "65ada7344c5ac313dbd157706fb96cfae968eacc3480070bb68f3f84edfe532f"
+    },
+    {
+      "name": "held-056.json",
+      "sha256": "97210ffc8b12363c4a5aa59dc69e26777ada71cdc6a920e8410889d604453d61"
+    },
+    {
+      "name": "held-057.json",
+      "sha256": "fa9fecccee5c83365037038d797ae4f36e3d1632cd98e50a1a53bdddf70bb112"
+    },
+    {
+      "name": "held-060.json",
+      "sha256": "fa70bd30f5f2035945da46dabe0c559c59aa1ed39a020eba7ed837fedb87cc08"
+    },
+    {
+      "name": "held-061.json",
+      "sha256": "9f9f2df45f8059b62953e9c083ad4bb1cda8a4cc926739edc72ec0c3ff28a2e5"
+    },
+    {
+      "name": "search-000.json",
+      "sha256": "3dc48b25e27637d70f50a3fbc344fae751829794563303420f94bcfa98a793e4"
+    },
+    {
+      "name": "search-001.json",
+      "sha256": "dd6adb78a5b779fe32e2d2d861c5a161b53f5ad7dc71bf0e97cd22a657d8e368"
+    },
+    {
+      "name": "search-004.json",
+      "sha256": "978dc579fafaa09e84d854ea94392caf219bfe79fa669411a739db5d1e5efb78"
+    },
+    {
+      "name": "search-005.json",
+      "sha256": "810b5c4931f422255b6200262638d216f7d45e44110178544e1060ef31a23bb4"
+    },
+    {
+      "name": "search-006.json",
+      "sha256": "f1dd67ef5c5991b140e2d9bc066693d55842936f742e39e5261ed9da8b0d6ee1"
+    },
+    {
+      "name": "search-009.json",
+      "sha256": "9411dd0d916086b979a749fe5ea3942beea5b03a85ab523ad078da25597fad05"
+    },
+    {
+      "name": "search-010.json",
+      "sha256": "ef2e4cc9452e47307d7ab8c8a6eab0929d29b4620d75e4cb8c6ff7b4a401fbf9"
+    },
+    {
+      "name": "search-011.json",
+      "sha256": "71476573cfa5800dd90bad8ec9228195260e31f161c5c165d4c7c1040436a59a"
+    },
+    {
+      "name": "search-014.json",
+      "sha256": "c6f1fa8d4495e83d57305ac128b902e17a40166b18b244574e50c7e3ad982f7e"
+    },
+    {
+      "name": "search-015.json",
+      "sha256": "23dbdacdbd4310b951972ed46e3737d5f2dfcb0cf9619a788fee543a5a22917a"
+    },
+    {
+      "name": "search-016.json",
+      "sha256": "54fb5a1c7cfadcec0341ccd959ee280403a00a15874678c62c282fdc6ea1917c"
+    },
+    {
+      "name": "search-019.json",
+      "sha256": "dfb5843b5b5741795d1ca210ff6eb0db9169900717c1f7bb67ee23ba11661040"
+    },
+    {
+      "name": "search-020.json",
+      "sha256": "d7e8dba3ec7fd78d09658dbbb0e2d57c9e1840486d6bd3aecca154c15111f38e"
+    },
+    {
+      "name": "search-021.json",
+      "sha256": "90ec2247872849485ad8a093b70e90fb4b7751643056d82006cb30bab7179120"
+    },
+    {
+      "name": "search-024.json",
+      "sha256": "95ad109d1a5de8f77cd717dd8c939f75b7e695b864baec8093ad6a44af5fdfe7"
+    },
+    {
+      "name": "search-025.json",
+      "sha256": "c5669bd1a5cc1e46bdf8c37171209ea47b9f6ea6ae9d49a72401deb8ada50ef7"
+    },
+    {
+      "name": "search-026.json",
+      "sha256": "aa3a15853af6487c959c296073c66176d16127db5811ba9add69ebcf976729ad"
+    },
+    {
+      "name": "search-029.json",
+      "sha256": "caf25d7849daf585f39c50e812ed40fb76f9f4c60adfe30391ac30fa5c5e7ff6"
+    },
+    {
+      "name": "search-030.json",
+      "sha256": "d356d65efe3d30570c823eee307b43502f64911a71bd4c25098eaeb4765e4fc4"
+    },
+    {
+      "name": "search-031.json",
+      "sha256": "064c2b889e38ac0e7d85a538c38f43f2b97190d972bf8f7ba9cda71f4f278dcf"
+    },
+    {
+      "name": "search-032.json",
+      "sha256": "46a5e3f21a39c4b210e61989df950fe646ef60a4ace7692094576926e85b3cae"
+    },
+    {
+      "name": "search-037.json",
+      "sha256": "9e794629ad5d476699b801ddf504c61de248b553d8c8727d6f5a8e7aa0b5af7f"
+    },
+    {
+      "name": "search-040.json",
+      "sha256": "0c0e30f42813943a701444d2ca755bb9e6ffa9aaf3afa5c5713a50f91398fd2b"
+    },
+    {
+      "name": "search-041.json",
+      "sha256": "0c7d27aaf41ed5730a9be7aa17bfb52060c38f1fd7a7a17a9ffcce34c8cdf84c"
+    },
+    {
+      "name": "search-042.json",
+      "sha256": "26aca49e6c5813bcd1213301f8f8db1f411b8bafdbf6a6542dc24de4be6dd953"
+    },
+    {
+      "name": "search-045.json",
+      "sha256": "5a1436b8566f0b8040f8ef4e01c3bcae9c320d50b2ed452ef5ac2f9c24fb3c52"
+    },
+    {
+      "name": "search-046.json",
+      "sha256": "073a989632913d2c7d7cde24b6a1be17ce9806642e1ec87c154bfd18f2beba31"
+    },
+    {
+      "name": "search-047.json",
+      "sha256": "4e4a67775d23ecf689c79695cac1b92617f219f5ccd179e7848c9e80e2df4bae"
+    },
+    {
+      "name": "search-050.json",
+      "sha256": "200064d53ef6762740d0734f59988b7e83f19bfdadfdf1a6d53752a31b280f90"
+    },
+    {
+      "name": "search-051.json",
+      "sha256": "73325a626156dab4f5259f792471765c34f89f85993f0700e4801953141363d5"
+    },
+    {
+      "name": "search-052.json",
+      "sha256": "59e3fb18b5385fb45f17e385d53dba97efaf9294a1ee902679862afe58cd4be1"
+    },
+    {
+      "name": "search-055.json",
+      "sha256": "0d04db37eb10c6326e66ecaee0684f4856d15fa16e0321f9bebef97fcefe0dd1"
+    },
+    {
+      "name": "search-056.json",
+      "sha256": "202fbbec4382d44f818ac4067e531902ba9fa57efb50e7d8bdb30092cd80bd9a"
+    },
+    {
+      "name": "search-057.json",
+      "sha256": "a8d69dc484ec1f8e3fa5c4d21a1e53035aeab61664fcf0344c11ffa3bdba90a4"
+    },
+    {
+      "name": "search-060.json",
+      "sha256": "6ea9776f3f4435114a75bf9e0131a218e519a34135f7b63097df593f2a8b04f9"
+    },
+    {
+      "name": "search-061.json",
+      "sha256": "0a79661441fe0437d5c4ca8f8bb2294b37309b2256bcc271bcadda1fc2c7d6a0"
+    }
+  ],
+  "exports": [
+    {
+      "source": "comparison/scenarios.csv",
+      "source_sha256": "8bc0dcb11324a1d572d46b9888a820836149f87343c30bdb78ceaaa53d459fb2",
+      "export": "scenarios.csv",
+      "export_sha256": "6db4b1156ee652fde60fb9a12239cba72f798ecc69390f621b5afc58141b2fb9"
+    },
+    {
+      "source": "comparison/decision-dates.csv",
+      "source_sha256": "00623a561bfa2b5ef871691968d354222dc05c106ec1b88e0615dfb92fe48b75",
+      "export": "decisions.csv",
+      "export_sha256": "9babedf65e5b4b8d0dc1cfcee34fcaf9fb48a095af905c334017458ad9864208"
+    }
+  ]
+}

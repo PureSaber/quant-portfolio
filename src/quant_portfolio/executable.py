@@ -227,13 +227,19 @@ def repair_integer_target(
         yield "current_account", np.minimum(np.maximum(quantities, minimum), maximum), {}
 
     mark_weights = np.array([float(p / nav) for p in marks])
-    for seed_name, seed, seed_metadata in starts():
+    seed_count = 3 if feasibility_seed is not None else 2
+    for seed_index, (seed_name, seed, seed_metadata) in enumerate(starts()):
+        seed_started = perf_counter()
         actions = []
         q = seed.copy()
         score, details = evaluate(q)
-        seed_deadline = started + max(timeout_seconds - 0.05, timeout_seconds * 0.95)
-        if seed_name == "rounded_strategy" and score[0] > 0 and feasibility_seed is not None:
-            seed_deadline = min(seed_deadline, perf_counter() + min(3.0, timeout_seconds / 4))
+        deadline = started + timeout_seconds * 0.98
+        # Reserve a fair share for every remaining start, including the actual
+        # account. A risk seed must not starve that fallback of all search time.
+        seed_deadline = min(
+            deadline,
+            perf_counter() + max(0, deadline - perf_counter()) / (seed_count - seed_index),
+        )
         seen = set()
         frontier = []
         backtracks = 0
@@ -253,7 +259,52 @@ def repair_integer_target(
             # and risk constraints. Ranking is a heuristic, never a feasibility
             # test. First improvement avoids an exhaustive O(n^2) exact ledger
             # evaluation on every iteration. Ties use sorted asset identifiers.
-            def candidates(q, score=score, backtracks=backtracks):
+            def candidates(q, score=score, backtracks=backtracks, details=details):
+                # Deal with the actual post-fee violations before ranking by
+                # distance to the strategy target. Per-asset diagnostics carry
+                # arbitrary caps; no 5% constant is embedded in the repair.
+                if score[0] > 0 and details is not None:
+                    _, _, costs_now, violations = details
+                    unit = np.array([float(p / (nav - costs_now)) for p in marks])
+                    simultaneous = q.copy()
+                    moves = []
+                    for i, asset in enumerate(assets):
+                        excess = violations.get("asset_upper:" + asset, 0.0)
+                        shortage = violations.get("asset_lower:" + asset, 0.0)
+                        if excess <= 1e-7 and shortage <= 1e-7:
+                            continue
+                        direction = -1 if excess > 1e-7 else 1
+                        amount = max(excess, shortage)
+                        count = max(1, int(np.ceil(amount / (unit[i] * steps[i]))))
+                        for extra in (0, 1):
+                            delta = direction * (count + extra) * steps[i]
+                            if legal(i, q[i] + delta):
+                                candidate = q.copy()
+                                candidate[i] += delta
+                                yield candidate, [(asset, int(delta))]
+                        delta = direction * count * steps[i]
+                        if legal(i, q[i] + delta):
+                            simultaneous[i] += delta
+                            moves.append((asset, int(delta)))
+                    if moves:
+                        yield simultaneous, moves
+                        # A binding TE/turnover limit can make an isolated cap
+                        # reduction worse. Try a compensating purchase together
+                        # with it, including unequal lot sizes/notionals.
+                        for i, asset in enumerate(assets):
+                            if simultaneous[i] >= q[i]:
+                                continue
+                            released = (q[i] - simultaneous[i]) * unit[i]
+                            for j in range(n):
+                                if i == j or simultaneous[j] != q[j]:
+                                    continue
+                                count = max(1, int(released / (unit[j] * steps[j])))
+                                for multiple in sorted({1, count, count + 1}):
+                                    delta = multiple * steps[j]
+                                    if legal(j, simultaneous[j] + delta):
+                                        candidate = simultaneous.copy()
+                                        candidate[j] += delta
+                                        yield candidate, moves + [(assets[j], int(delta))]
                 distance = q * mark_weights - target
                 changes = []
                 for i in range(n):
@@ -320,12 +371,14 @@ def repair_integer_target(
                                     ],
                                 )
 
+            candidate_count = 0
             for candidate, changes in candidates(q):
                 if perf_counter() > seed_deadline:
                     break
                 if tuple(candidate) in seen:
                     continue
                 candidate_score, candidate_details = evaluate(candidate)
+                candidate_count += 1
                 if candidate_score < winner_score:
                     winner, winner_score, winner_details, move = (
                         candidate,
@@ -333,13 +386,20 @@ def repair_integer_target(
                         candidate_details,
                         changes,
                     )
-                    break
+                    # During infeasible search, compare a bounded batch instead
+                    # of chasing the first tiny fee/merit improvement. Once
+                    # feasible, retain it immediately and refine only within
+                    # the feasible set toward the original continuous target.
+                    if candidate_score[0] == 0 or score[0] == 0:
+                        break
                 if score[0] > 0 and backtracks < max_backtracks and tuple(candidate) not in seen:
                     frontier.append(
                         (candidate_score, tuple(candidate), candidate_details, actions + [changes])
                     )
                     frontier.sort(key=lambda item: (item[0], item[1]))
                     del frontier[max_backtracks:]
+                if move is not None and candidate_count >= max(64, 2 * n):
+                    break
             if move is None:
                 while frontier and tuple(frontier[0][1]) in seen:
                     frontier.pop(0)
@@ -366,6 +426,7 @@ def repair_integer_target(
                 "termination": termination,
                 "backtracks": backtracks,
                 "seed_diagnostics": seed_metadata,
+                "seconds": perf_counter() - seed_started,
             }
         )
         # The current-position seed is a fallback for failed repair, not a
@@ -402,7 +463,7 @@ def repair_integer_target(
         {
             "status": "repaired",
             "integer_global_optimum": False,
-            "search_method": "constraint_repair_with_feasibility_seed_and_bounded_backtracking",
+            "search_method": "constraint_directed_batched_repair_v2",
             "max_exchange_candidates": max_exchange_candidates,
             "exact_candidate_evaluations": evaluations,
             "repair_actions": actions,

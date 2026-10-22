@@ -1,0 +1,116 @@
+[
+  {
+    "scenario": 9,
+    "date": "2024-06-11",
+    "passed": true,
+    "maximum_residual": 0.0
+  },
+  {
+    "scenario": 10,
+    "date": "2024-03-11",
+    "passed": true,
+    "maximum_residual": 7.205636508994528e-08
+  },
+  {
+    "scenario": 14,
+    "date": "2024-06-11",
+    "passed": true,
+    "maximum_residual": 2.220446049250313e-16
+  },
+  {
+    "scenario": 19,
+    "date": "2023-04-19",
+    "passed": true,
+    "maximum_residual": 1.1102230246251565e-16
+  },
+  {
+    "scenario": 19,
+    "date": "2023-09-06",
+    "passed": true,
+    "maximum_residual": 2.220446049250313e-16
+  },
+  {
+    "scenario": 20,
+    "date": "2023-08-16",
+    "passed": true,
+    "maximum_residual": 3.799376091517814e-11
+  },
+  {
+    "scenario": 25,
+    "date": "2023-08-02",
+    "passed": true,
+    "maximum_residual": 5.089014626369348e-11
+  },
+  {
+    "scenario": 26,
+    "date": "2023-08-16",
+    "passed": true,
+    "maximum_residual": 2.098321516541546e-14
+  },
+  {
+    "scenario": 40,
+    "date": "2023-12-21",
+    "passed": true,
+    "maximum_residual": 4.440892098500626e-16
+  },
+  {
+    "scenario": 40,
+    "date": "2023-12-28",
+    "passed": true,
+    "maximum_residual": 1.1102230246251565e-16
+  },
+  {
+    "scenario": 41,
+    "date": "2023-12-14",
+    "passed": true,
+    "maximum_residual": 8.696030007193656e-12
+  },
+  {
+    "scenario": 41,
+    "date": "2023-12-21",
+    "passed": true,
+    "maximum_residual": 2.7506066868632217e-11
+  },
+  {
+    "scenario": 45,
+    "date": "2023-12-14",
+    "passed": true,
+    "maximum_residual": 4.440892098500626e-16
+  },
+  {
+    "scenario": 45,
+    "date": "2023-12-21",
+    "passed": true,
+    "maximum_residual": 2.220446049250313e-16
+  },
+  {
+    "scenario": 45,
+    "date": "2023-12-28",
+    "passed": true,
+    "maximum_residual": 2.220446049250313e-16
+  },
+  {
+    "scenario": 46,
+    "date": "2023-12-14",
+    "passed": true,
+    "maximum_residual": 2.9249096200612e-11
+  },
+  {
+    "scenario": 46,
+    "date": "2023-12-21",
+    "passed": true,
+    "maximum_residual": 5.664495261736846e-11
+  },
+  {
+    "scenario": 50,
+    "date": "2023-08-23",
+    "passed": true,
+    "maximum_residual": 0.0
+  },
+  {
+    "scenario": 55,
+    "date": "2023-06-12",
+    "passed": true,
+    "maximum_residual": 0.0
+  }
+]
